@@ -1,6 +1,1 @@
-*.scala linguist-detectable=true
-*.css linguist-detectable=false
-*.js linguist-detectable=false
-*.md linguist-detectable=false
-*.py linguist-detectable=false
-*.json linguist-detectable=false
+* linguist-language=Scala
