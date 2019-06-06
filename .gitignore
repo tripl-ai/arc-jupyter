@@ -1,0 +1,12 @@
+.bash_history
+.ipynb_checkpoints
+.ipython
+.jupyter/migrated
+.local
+.cache
+spark-warehouse
+.metals/
+.bloop/
+.ivy2/
+target/
+project/project
