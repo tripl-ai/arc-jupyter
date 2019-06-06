@@ -28,4 +28,5 @@ triplai/arc-jupyter:[VERSION]
 ## License
 
 Arc-Jupyter is released under the [MIT License](https://opensource.org/licenses/MIT).
+
 Project build with [Almond](https://github.com/almond-sh/almond) BSD 3-Clause "New" or "Revised" License.
