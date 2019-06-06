@@ -9,14 +9,6 @@ RUN pip install jupyter_contrib_nbextensions && \
   jupyter nbextensions_configurator disable --user && \
   jupyter nbextension enable execute_time/ExecuteTime
 
-# copy in dependencies
-# this will be removed once arc is in maven
-COPY .ivy2 /tmp/.ivy2
-USER root
-RUN mkdir -p /home/jovyan/.ivy2/local && \
-  cp -R /tmp/.ivy2/* /home/jovyan/.ivy2/local && \
-  chown -R jovyan:users /home/jovyan/.ivy2/local/* 
-
 # build and add plugin
 USER jovyan
 RUN cd /tmp && \

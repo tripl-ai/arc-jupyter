@@ -1,0 +1,57 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+- master
+- develop
+- feature/*
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+
+steps:
+# Download the pgp keys from azure secure library
+- task: DownloadSecureFile@1
+  displayName: 'Get secring.asc from Azure Secure Library'
+  inputs:
+    secureFile: "secring.asc"
+
+- task: DownloadSecureFile@1
+  displayName: 'Get pubring.asc from Azure Secure Library'
+  inputs:
+    secureFile: "pubring.asc"    
+
+- script: |
+    docker pull mozilla/sbt:8u212_1.2.8
+  displayName: 'Pull sbt image (mozilla/sbt:8u212_1.2.8) from Dockerhub'
+
+- script: |
+    docker run \
+    --rm \
+    -v $(pwd):/app \
+    -w /app \
+    mozilla/sbt:8u212_1.2.8 \
+    sbt test
+  displayName: 'Run sbt test'
+
+- script: |
+    mkdir -p /tmp/pgp && \
+    cp $(DownloadSecureFile1.secureFilePath) /tmp/pgp && \
+    cp $(DownloadSecureFile2.secureFilePath) /tmp/pgp
+  displayName: 'Move pgp keys'  
+
+- script: |
+    docker run \
+    --rm \
+    -e SONATYPE_USERNAME=$(SONATYPE_USERNAME) \
+    -e SONATYPE_PASSWORD=$(SONATYPE_PASSWORD) \
+    -e PGP_PASSPHRASE=$(PGP_PASSPHRASE) \
+    -v /tmp/pgp:/pgp \
+    -v $(pwd):/app \
+    -w /app \
+    mozilla/sbt:8u212_1.2.8 \
+    sbt publishSigned
+  displayName: 'Run sbt publishSigned (push to https://oss.sonatype.org/content/groups/staging/)'
