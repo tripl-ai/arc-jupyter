@@ -1,5 +1,7 @@
 FROM jupyter/pyspark-notebook:abdb27a6dfbb
 
+ARG ARC_JUPYTER_VERSION
+ENV SCALA_VERSION         2.11
 ENV JAVA_OPTS "-Xmx1g"
 ENV BASE_JAVA_OPTS "-XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:+UseCGroupMemoryLimitForHeap"
 
@@ -17,11 +19,12 @@ RUN cd /tmp && \
   /tmp/coursier-cli bootstrap \
   --embed-files=false \
   --force-version com.fasterxml.jackson.core:jackson-databind:2.6.7.1 \
-  --force-version org.json4s:json4s-ast_2.11:3.5.3 \
-  --force-version org.json4s:json4s-core_2.11:3.5.3 \
-  --force-version org.json4s:json4s-jackson_2.11:3.5.3 \
-  --force-version org.json4s:json4s-scalap_2.11:3.5.3 \
-  ai.tripl:arc-jupyter_2.11:0.0.12 \
+  --force-version org.json4s:json4s-ast_${SCALA_VERSION}:3.5.3 \
+  --force-version org.json4s:json4s-core_${SCALA_VERSION}:3.5.3 \
+  --force-version org.json4s:json4s-jackson_${SCALA_VERSION}:3.5.3 \
+  --force-version org.json4s:json4s-scalap_${SCALA_VERSION}:3.5.3 \
+  --force-version org.slf4j:slf4j-log4j12:1.7.16 \
+  ai.tripl:arc-jupyter_${SCALA_VERSION}:${ARC_JUPYTER_VERSION} \
   -o arc && \
   ./arc --install --force && \
   rm /tmp/arc && \
