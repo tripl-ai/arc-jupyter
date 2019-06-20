@@ -25,33 +25,35 @@ steps:
     secureFile: "pubring.asc"    
 
 - script: |
-    docker pull mozilla/sbt:8u212_1.2.8
-  displayName: 'Pull sbt image (mozilla/sbt:8u212_1.2.8) from Dockerhub'
-
-- script: |
-    docker run \
-    --rm \
-    -v $(pwd):/app \
-    -w /app \
-    mozilla/sbt:8u212_1.2.8 \
-    sbt test
-  displayName: 'Run sbt test'
-
-- script: |
     mkdir -p /tmp/pgp && \
-    cp $(DownloadSecureFile1.secureFilePath) /tmp/pgp && \
-    cp $(DownloadSecureFile2.secureFilePath) /tmp/pgp
+    mv $(DownloadSecureFile1.secureFilePath) /tmp/pgp && \
+    mv $(DownloadSecureFile2.secureFilePath) /tmp/pgp
   displayName: 'Move pgp keys'  
 
 - script: |
     docker run \
-    --rm \
+    -d \
+    --name sbt \
+    -v $(pwd):/app \
+    -v /tmp/pgp:/pgp \
+    mozilla/sbt:8u212_1.2.8 \
+    tail -f /dev/null
+  displayName: 'Create a docker based testing environment (including mozilla/sbt:8u212_1.2.8)'
+
+- script: |
+    docker exec \
+    -w /app \
+    sbt \
+    sbt test
+  displayName: 'sbt test'
+
+- script: |
+    docker exec \
     -e SONATYPE_USERNAME=$(SONATYPE_USERNAME) \
     -e SONATYPE_PASSWORD=$(SONATYPE_PASSWORD) \
     -e PGP_PASSPHRASE=$(PGP_PASSPHRASE) \
-    -v /tmp/pgp:/pgp \
-    -v $(pwd):/app \
     -w /app \
-    mozilla/sbt:8u212_1.2.8 \
+    sbt \
     sbt publishSigned
-  displayName: 'Run sbt publishSigned (push to https://oss.sonatype.org/content/groups/staging/)'
+  displayName: 'sbt publishSigned (push to https://oss.sonatype.org/content/groups/staging/)'
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
