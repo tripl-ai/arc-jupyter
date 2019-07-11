@@ -8,5 +8,6 @@ spark-warehouse
 .metals/
 .bloop/
 .ivy2/
+local/
 target/
 project/project

@@ -1,7 +1,8 @@
 // add code format for arc types
 require(['notebook/js/codecell'], function (codecell) {
-  codecell.CodeCell.options_default.highlight_modes['magic_text/x-sh'] = { 'reg': [/^%env/] };
+  codecell.CodeCell.options_default.highlight_modes['magic_text/x-sh'] = { 'reg': [/^(%env|%metadata)/] };
   codecell.CodeCell.options_default.highlight_modes['magic_text/x-sql'] = { 'reg': [/^%sql/] };
+  codecell.CodeCell.options_default.highlight_modes['magic_application/x-cypher-query'] = { 'reg': [/^%cypher/] };
   codecell.CodeCell.options_default.highlight_modes['magic_text/javascript'] = { 'reg': [/^%arc|^{/] };
 
   // auto highlight on start

@@ -2,6 +2,8 @@ package ai.tripl.arc.jupyter
 
 import java.util.Properties
 import java.util.UUID
+import java.util.ServiceLoader
+import scala.collection.JavaConverters._
 
 import almond.interpreter.{Completion, ExecuteResult, Inspection, Interpreter}
 import almond.interpreter.api.{DisplayData, OutputHandler}
@@ -14,6 +16,7 @@ import argonaut.Argonaut._
 import org.apache.commons.lang3.time.DurationFormatUtils
 import org.apache.spark.sql._
 import org.apache.log4j.{Level, Logger}
+import org.apache.spark.storage.StorageLevel
 
 import ai.tripl.arc.ARC
 import ai.tripl.arc.api.API.ARCContext
@@ -21,14 +24,15 @@ import ai.tripl.arc.util.ConfigUtils
 import ai.tripl.arc.util.MetadataUtils
 import ai.tripl.arc.util.SQLUtils
 import ai.tripl.arc.util.log.LoggerFactory 
+import ai.tripl.arc.plugins._
 
 import java.lang.management.ManagementFactory
 
 final class ArcInterpreter extends Interpreter {
 
   implicit var spark: SparkSession = _  
-  var argsMap = collection.mutable.Map[String, String]()
-  val dependencyGraph = ConfigUtils.Graph(Nil, Nil, false)
+  var master: String = "local[*]"
+  implicit var ctx: Option[ARCContext] = None
 
   def kernelInfo(): KernelInfo =
     KernelInfo(
@@ -57,6 +61,7 @@ final class ArcInterpreter extends Interpreter {
 
     try {
       Logger.getLogger("org").setLevel(Level.ERROR)
+      Logger.getLogger("breeze").setLevel(Level.ERROR)
 
       // the memory available to the container (i.e. the docker memory limit)
       val physicalMemorySize = ManagementFactory.getOperatingSystemMXBean.asInstanceOf[com.sun.management.OperatingSystemMXBean].getTotalPhysicalMemorySize
@@ -67,7 +72,7 @@ final class ArcInterpreter extends Interpreter {
       } else {
         val session = SparkSession
           .builder()
-          .master("local[*]")
+          .master(master)
           .appName("arc-jupyter")
           .config("spark.sql.warehouse.dir", "/tmp/spark-warehouse")
           .config("spark.rdd.compress", true)
@@ -79,8 +84,31 @@ final class ArcInterpreter extends Interpreter {
         spark = session
 
         implicit val logger = LoggerFactory.getLogger("")
-        implicit val arcContext = ARCContext(None, None, "", None, None, false, true, Nil, false)
+        val loader = ai.tripl.arc.util.Utils.getContextOrSparkClassLoader
 
+        // store previous value so that the ServiceLoader resolution is not called each run
+        implicit val arcContext = ctx.getOrElse({
+          ctx = Option(ARCContext(
+            jobId=None, 
+            jobName=None, 
+            environment=None, 
+            environmentId=None, 
+            configUri=None, 
+            isStreaming=false, 
+            ignoreEnvironments=true, 
+            commandLineArguments=Map.empty,
+            storageLevel=StorageLevel.MEMORY_AND_DISK_SER,
+            immutableViews=false,
+            dynamicConfigurationPlugins=Nil,
+            lifecyclePlugins=Nil,
+            activeLifecyclePlugins=Nil,
+            pipelineStagePlugins=ServiceLoader.load(classOf[PipelineStagePlugin], loader).iterator().asScala.toList,
+            udfPlugins=ServiceLoader.load(classOf[UDFPlugin], loader).iterator().asScala.toList,
+            userData=collection.mutable.Map.empty
+          ))
+          ctx.get
+        })
+      
         import session.implicits._
 
         // parse input
@@ -91,7 +119,7 @@ final class ArcInterpreter extends Interpreter {
           }
           case x: String if (x.startsWith("%sql")) => {
             ("sql", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
-          }
+          }  
           case x: String if (x.startsWith("%schema")) => {
             ("schema", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }       
@@ -100,13 +128,19 @@ final class ArcInterpreter extends Interpreter {
           }          
           case x: String if (x.startsWith("%metadata")) => {
             ("metadata", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
-          }       
+          }  
+          case x: String if (x.startsWith("%printmetadata")) => {
+            ("printmetadata", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
+          }                   
           case x: String if (x.startsWith("%summary")) => {
             ("summary", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }              
           case x: String if (x.startsWith("%env")) => {
             ("env", parseArgs(lines(0)), "")
-          }        
+          } 
+          case x: String if (x.startsWith("%conf")) => {
+            ("conf", parseArgs(lines(0)), "")
+          }                     
           case x: String if (x.startsWith("%version")) => {
             ("version", parseArgs(lines(0)), "")
           }                   
@@ -131,17 +165,16 @@ final class ArcInterpreter extends Interpreter {
         val numRows = commandArgs.getOrElse("numRows", "20").toInt
         val truncate = commandArgs.getOrElse("truncate", "50").toInt
 
-
         interpreter match {
           case "arc" => {
             
-            val pipelineEither = ConfigUtils.parseConfig(Left(s"""{"stages": [${command}]}"""), argsMap, dependencyGraph, arcContext)
+            val pipelineEither = ConfigUtils.parseConfig(Left(s"""{"stages": [${command}]}"""), arcContext)
 
             pipelineEither match {
               case Left(errors) => {
-                ExecuteResult.Error(ConfigUtils.Error.pipelineSimpleErrorMsg(errors))
+                ExecuteResult.Error(ai.tripl.arc.config.Error.pipelineSimpleErrorMsg(errors))
               }
-              case Right( (pipeline, _, _) ) => {
+              case Right((pipeline, _)) => {
                 pipeline.stages.length match {
                   case 0 => {
                     ExecuteResult.Error("No stages found.")
@@ -163,7 +196,7 @@ final class ArcInterpreter extends Interpreter {
             }
           }
           case "sql" => {
-            val df = spark.sql(SQLUtils.injectParameters(command, argsMap.toMap, true))
+            val df = spark.sql(SQLUtils.injectParameters(command, arcContext.commandLineArguments, true))
             commandArgs.get("outputView") match {
               case Some(ov) => df.createOrReplaceTempView(ov)
               case None =>
@@ -171,7 +204,7 @@ final class ArcInterpreter extends Interpreter {
             ExecuteResult.Success(
               DisplayData.html(renderHTML(df, numRows, truncate))
             )          
-          }
+          }         
           case "schema" => {
             ExecuteResult.Success(
               DisplayData.text(spark.table(command).schema.prettyJson)
@@ -183,6 +216,16 @@ final class ArcInterpreter extends Interpreter {
             )   
           } 
           case "metadata" => {
+            val df = MetadataUtils.createMetadataDataframe(spark.table(command))
+            commandArgs.get("outputView") match {
+              case Some(ov) => df.createOrReplaceTempView(ov)
+              case None =>
+            }
+            ExecuteResult.Success(
+              DisplayData.html(renderHTML(df, numRows, truncate))
+            )   
+          }           
+          case "printmetadata" => {
             ExecuteResult.Success(
               DisplayData.text(MetadataUtils.makeMetadataFromDataframe(spark.table(command)))
             )   
@@ -193,9 +236,37 @@ final class ArcInterpreter extends Interpreter {
             )   
           }           
           case "env" => {
-            argsMap = commandArgs
+            // recreate context with the new environment
+            ctx = Option(ARCContext(
+              jobId=arcContext.jobId, 
+              jobName=arcContext.jobName, 
+              environment=arcContext.environment, 
+              environmentId=arcContext.environmentId, 
+              configUri=arcContext.configUri, 
+              isStreaming=arcContext.isStreaming, 
+              ignoreEnvironments=arcContext.ignoreEnvironments, 
+              storageLevel=arcContext.storageLevel,
+              immutableViews=arcContext.immutableViews,
+              commandLineArguments=commandArgs.toMap,
+              dynamicConfigurationPlugins=arcContext.dynamicConfigurationPlugins,
+              lifecyclePlugins=arcContext.lifecyclePlugins,
+              activeLifecyclePlugins=arcContext.activeLifecyclePlugins,
+              pipelineStagePlugins=arcContext.pipelineStagePlugins,
+              udfPlugins=arcContext.udfPlugins,
+              userData=arcContext.userData
+            ))
             ExecuteResult.Success(DisplayData.empty)     
           }       
+          case "conf" => {
+            commandArgs.get("master") match {
+              case Some(m) => {
+                master = m
+                spark.stop
+              }
+              case None =>
+            }
+            ExecuteResult.Success(DisplayData.empty)     
+          }             
           case "version" => {
             ExecuteResult.Success(
               DisplayData.text(s"spark: ${spark.version}\narc: ${ai.tripl.arc.ArcBuildInfo.BuildInfo.version}\narc-jupyter: ${ai.tripl.arc.jupyter.BuildInfo.version}\nscala: ${scala.util.Properties.versionNumberString}\njava: ${System.getProperty("java.runtime.version")}")

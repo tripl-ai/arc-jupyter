@@ -2,8 +2,8 @@ FROM jupyter/pyspark-notebook:abdb27a6dfbb
 
 ARG ARC_JUPYTER_VERSION
 ENV SCALA_VERSION         2.11
-ENV JAVA_OPTS "-Xmx1g"
-ENV BASE_JAVA_OPTS "-XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:+UseCGroupMemoryLimitForHeap"
+ENV JAVA_OPTS             "-Xmx1g"
+ENV BASE_JAVA_OPTS        "-XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:+UseCGroupMemoryLimitForHeap"
 
 # add the execution time extension
 RUN pip install jupyter_contrib_nbextensions && \
@@ -11,7 +11,7 @@ RUN pip install jupyter_contrib_nbextensions && \
   jupyter nbextensions_configurator disable --user && \
   jupyter nbextension enable execute_time/ExecuteTime
 
-# build and add plugin
+# get dependencies
 USER jovyan
 RUN cd /tmp && \
   wget -P /tmp https://git.io/coursier-cli && \
@@ -26,7 +26,12 @@ RUN cd /tmp && \
   --force-version com.google.guava:guava:14.0.1 \
   --force-version org.slf4j:slf4j-log4j12:1.7.16 \
   --exclude org.slf4j:slf4j-nop \
-  ai.tripl:arc-jupyter_${SCALA_VERSION}:${ARC_JUPYTER_VERSION} \
+  ai.tripl:arc-jupyter_${SCALA_VERSION}:1.0.0 \
+  ai.tripl:arc-deltaperiod-config-plugin_${SCALA_VERSION}:1.0.0 \
+  ai.tripl:arc-deltalake-pipeline-plugin_${SCALA_VERSION}:1.0.0 \
+  ai.tripl:arc-elasticsearch-pipeline-plugin_${SCALA_VERSION}:1.0.0 \
+  ai.tripl:arc-kafka-pipeline-plugin_${SCALA_VERSION}:1.0.0 \
+  ai.tripl:arc-mongodb-pipeline-plugin_${SCALA_VERSION}:1.0.0 \  
   -o arc && \
   ./arc --install --force && \
   rm /tmp/arc && \

@@ -11,7 +11,6 @@ trigger:
 pool:
   vmImage: 'ubuntu-latest'
 
-
 steps:
 # Download the pgp keys from azure secure library
 - task: DownloadSecureFile@1
