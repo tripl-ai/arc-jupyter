@@ -53,15 +53,6 @@ FROM green_tripdata0_raw
 WHERE fare_amount < 10
 ```
 
-### Dockerfile
-
-To build the docker image:
-
-```bash
-export ARC_JUPYTER_VERSION=$(awk -F'"' '$0=$2' version.sbt)
-docker build . --build-arg ARC_JUPYTER_VERSION=${ARC_JUPYTER_VERSION} -t triplai/arc-jupyter:${ARC_JUPYTER_VERSION}
-```
-
 ## Authors/Contributors
 
 - [Mike Seddon](https://github.com/seddonm1)
