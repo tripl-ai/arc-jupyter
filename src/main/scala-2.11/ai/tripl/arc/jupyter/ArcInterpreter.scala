@@ -231,8 +231,13 @@ final class ArcInterpreter extends Interpreter {
             )   
           } 
           case "summary" => {
+            val df = spark.table(command).summary()
+            commandArgs.get("outputView") match {
+              case Some(ov) => df.createOrReplaceTempView(ov)
+              case None =>
+            }            
             ExecuteResult.Success(
-              DisplayData.html(renderHTML(spark.table(command).summary(), numRows, truncate))
+              DisplayData.html(renderHTML(df, numRows, truncate))
             )   
           }           
           case "env" => {

@@ -21,6 +21,32 @@ docker run \
 triplai/arc-jupyter:[VERSION]
 ```
 
+## Capabilities
+
+| Magic          | Description                                                                                | Scala 2.11 | Scala 2.12 | numRows | truncate | outputView |
+|----------------|--------------------------------------------------------------------------------------------|------------|------------|---------|----------|------------|
+| %arc           | Execute an Arc stage. Default.                                                             | ✔          | ✔          | ✔       | ✔        | ✔          |
+| %conf          | Set Spark configuration. Currently only `master`: `%conf master=local[*]`                  | ✔          | ✔          |         |          |            |
+| %cypher        | Execute a Cypher query and return resultset.                                               |            | ✔          | ✔       | ✔        | ✔          |
+| %env           | Set job variables via the notebook (e.g. `%env ETL_CONF_KEY0=value0 ETL_CONF_KEY1=value1`) | ✔          | ✔          |         |          |            |
+| %metadata      | Returns the metadata of an input view as a resultset.                                      | ✔          | ✔          | ✔       | ✔        | ✔          |
+| %printmetadata | Prints the Arc metadata JSON for the input view.                                           | ✔          | ✔          |         |          |            |
+| %printschema   | Prints the Spark schema for the input view as text.                                        | ✔          | ✔          |         |          |            |
+| %schema        | Prints the Spark schema for the input view.                                                | ✔          | ✔          |         |          |            |
+| %sql           | Execute a SQL query and return resultset.                                                  | ✔          | ✔          | ✔       | ✔        | ✔          |
+| %summary       | Returns the summary statistics of an input view as resultset.                              | ✔          | ✔          | ✔       | ✔        | ✔          |
+| %version       | Prints the version information of Arc Jupyter.                                             | ✔          | ✔          |         |          |            |
+
+
+### Example
+
+```sql
+%sql numRows=10 truncate=100 outputView=green_tripdata0
+SELECT * 
+FROM green_tripdata0_raw
+WHERE fare_amount < 10
+```
+
 ### Dockerfile
 
 To build the docker image:
