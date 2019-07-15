@@ -38,7 +38,13 @@ triplai/arc-jupyter:[VERSION]
 | %version       | Prints the version information of Arc Jupyter.                                             | ✔          | ✔          |         |          |            |
 
 
+- `numRows` defines the number of rows to return in a result table.
+- `truncate` defines the maximum number of characters displayed in a single result cell.
+- `outputView` defines the name of a temporary view to register of the resultset.
+
 ### Example
+
+This example shows how to use the `numRows`, `truncate` and `outputView` options:
 
 ```sql
 %sql numRows=10 truncate=100 outputView=green_tripdata0
