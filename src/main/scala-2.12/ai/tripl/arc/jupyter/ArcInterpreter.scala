@@ -22,11 +22,11 @@ import org.opencypher.morpheus.api.MorpheusSession
 
 import ai.tripl.arc.ARC
 import ai.tripl.arc.api.API.ARCContext
-import ai.tripl.arc.util.ConfigUtils
+import ai.tripl.arc.config.ArcPipeline
+import ai.tripl.arc.plugins._
 import ai.tripl.arc.util.MetadataUtils
 import ai.tripl.arc.util.SQLUtils
 import ai.tripl.arc.util.log.LoggerFactory 
-import ai.tripl.arc.plugins._
 
 import java.lang.management.ManagementFactory
 
@@ -173,7 +173,7 @@ final class ArcInterpreter extends Interpreter {
         interpreter match {
           case "arc" => {
             
-            val pipelineEither = ConfigUtils.parseConfig(Left(s"""{"stages": [${command}]}"""), arcContext)
+            val pipelineEither = ArcPipeline.parseConfig(Left(s"""{"stages": [${command}]}"""), arcContext)
 
             pipelineEither match {
               case Left(errors) => {

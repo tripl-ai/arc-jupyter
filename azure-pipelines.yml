@@ -5,6 +5,7 @@
 
 trigger:
 - master
+- release/*
 - develop
 - feature/*
 
@@ -41,18 +42,33 @@ steps:
 
 - script: |
     docker exec \
-    -w /app \
     sbt \
-    sbt test
+    sbt "+test"
   displayName: 'sbt test'
+
+- script: |
+    docker exec \
+    sbt \
+    sbt "+it:test"
+  displayName: 'sbt it:test'  
 
 - script: |
     docker exec \
     -e SONATYPE_USERNAME=$(SONATYPE_USERNAME) \
     -e SONATYPE_PASSWORD=$(SONATYPE_PASSWORD) \
     -e PGP_PASSPHRASE=$(PGP_PASSPHRASE) \
-    -w /app \
     sbt \
-    sbt publishSigned
-  displayName: 'sbt publishSigned (push to https://oss.sonatype.org/content/groups/staging/)'
-  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
+    sbt "+publishSigned"
+  displayName: 'sbt publishSigned (push to https://oss.sonatype.org/content/groups/staging/ai/tripl/)'
+  condition: and(succeeded(), contains(variables['Build.SourceBranch'], 'refs/heads/release'))
+
+- script: |
+    docker exec \
+    -e SONATYPE_USERNAME=$(SONATYPE_USERNAME) \
+    -e SONATYPE_PASSWORD=$(SONATYPE_PASSWORD) \
+    -e PGP_PASSPHRASE=$(PGP_PASSPHRASE) \
+    sbt \
+    sbt "sonatypeRelease"
+  displayName: 'sbt sonatypeRelease (push to https://repo1.maven.org/maven2/ai/tripl/)'
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))  
+

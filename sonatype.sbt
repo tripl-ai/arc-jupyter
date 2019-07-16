@@ -1,5 +1,5 @@
 // Your profile name of the sonatype account. The default is the same with the organization value
-sonatypeProfileName := "ai.tripl.arc-jupyter"
+sonatypeProfileName := "ai.tripl"
 
 // To sync with Maven central, you need to supply the following information:
 publishMavenStyle := true
