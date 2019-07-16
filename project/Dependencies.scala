@@ -9,12 +9,14 @@ object Dependencies {
   val sparkHive = "org.apache.spark" %% "spark-hive" % sparkVersion
   val sparkMl = "org.apache.spark" %% "spark-mllib" % sparkVersion 
 
-  val kernel = "sh.almond" %% "kernel" % "0.5.0"
+  val kernel = "sh.almond" %% "kernel" % "0.6.0"
   val caseApp = "com.github.alexarchambault" %% "case-app" % "2.0.0-M8"
 
-  val arc = "ai.tripl" %% "arc" % "1.15.0"
+  val arc = "ai.tripl" %% "arc" % "2.0.0"
 
-  val etlDeps = Seq(
+  val graph = "ai.tripl" %% "arc-graph-pipeline-plugin" % "1.0.0"
+
+  val etlDeps211 = Seq(
     sparkCore,
     sparkSql,
     sparkHive,
@@ -22,5 +24,16 @@ object Dependencies {
     kernel,
     caseApp,
     arc
+  )
+  
+  val etlDeps212 = Seq(
+    sparkCore,
+    sparkSql,
+    sparkHive,
+    sparkMl,
+    kernel,
+    caseApp,
+    arc,
+    graph
   )
 }
