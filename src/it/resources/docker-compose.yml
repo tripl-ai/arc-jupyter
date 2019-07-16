@@ -1,0 +1,22 @@
+---
+version: '3.5'
+
+networks:
+  arc-integration:
+    name: arc-integration
+    driver: bridge
+    ipam:
+     config:
+       - subnet: 172.19.0.0/24  
+
+services:
+  sbt:
+    container_name: sbt
+    image: mozilla/sbt:8u212_1.2.8 
+    networks:
+      - arc-integration     
+    command: tail -f /dev/null
+    volumes:
+      - ${PWD}:/app  
+      - /tmp/pgp:/pgp
+    working_dir: /app

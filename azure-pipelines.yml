@@ -31,14 +31,12 @@ steps:
   displayName: 'Move pgp keys'  
 
 - script: |
-    docker run \
-    -d \
-    --name sbt \
-    -v $(pwd):/app \
-    -v /tmp/pgp:/pgp \
-    mozilla/sbt:8u212_1.2.8 \
-    tail -f /dev/null
-  displayName: 'Create a docker based testing environment (including mozilla/sbt:8u212_1.2.8)'
+    docker-compose \
+    -f src/it/resources/docker-compose.yml \
+    up \
+    --build \
+    -d
+  displayName: 'Create a docker-compose based testing environment (including idle mozilla/sbt:8u212_1.2.8)'
 
 - script: |
     docker exec \
