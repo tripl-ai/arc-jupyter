@@ -33,7 +33,9 @@ import java.lang.management.ManagementFactory
 final class ArcInterpreter extends Interpreter {
 
   implicit var spark: SparkSession = _  
-  var master: String = "local[*]"
+  var confMaster: String = "local[*]"
+  var confNumRows = 20
+  var confTruncate = 50
   implicit var ctx: Option[ARCContext] = None
 
   def kernelInfo(): KernelInfo =
@@ -74,7 +76,7 @@ final class ArcInterpreter extends Interpreter {
       } else {
         val session = SparkSession
           .builder()
-          .master(master)
+          .master(confMaster)
           .appName("arc-jupyter")
           .config("spark.sql.warehouse.dir", "/tmp/spark-warehouse")
           .config("spark.rdd.compress", true)
@@ -167,8 +169,14 @@ final class ArcInterpreter extends Interpreter {
           case None => None
         }        
 
-        val numRows = commandArgs.getOrElse("numRows", "20").toInt
-        val truncate = commandArgs.getOrElse("truncate", "50").toInt
+        val numRows = commandArgs.get("numRows") match {
+          case Some(numRows) => numRows.toInt
+          case None => confNumRows
+        }
+        val truncate = commandArgs.get("truncate") match {
+          case Some(truncate) => truncate.toInt
+          case None => confTruncate
+        }
 
         interpreter match {
           case "arc" => {
@@ -286,14 +294,18 @@ final class ArcInterpreter extends Interpreter {
           }       
           case "conf" => {
             commandArgs.get("master") match {
-              case Some(m) => {
-                master = m
+              case Some(master) => {
+                confMaster = master
                 spark.stop
               }
               case None =>
             }
-            ExecuteResult.Success(DisplayData.empty)     
-          }             
+            if (confNumRows != numRows) confNumRows = numRows
+            if (confTruncate != truncate) confTruncate = truncate
+            ExecuteResult.Success(
+              DisplayData.text(s"master: ${confMaster}\nnumRows: ${confNumRows}\ntruncate: ${confTruncate}\n")
+            )  
+          }              
           case "version" => {
             ExecuteResult.Success(
               DisplayData.text(s"spark: ${spark.version}\narc: ${ai.tripl.arc.ArcBuildInfo.BuildInfo.version}\narc-jupyter: ${ai.tripl.arc.jupyter.BuildInfo.version}\nscala: ${scala.util.Properties.versionNumberString}\njava: ${System.getProperty("java.runtime.version")}")
