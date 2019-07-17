@@ -31,7 +31,9 @@ import java.lang.management.ManagementFactory
 final class ArcInterpreter extends Interpreter {
 
   implicit var spark: SparkSession = _  
-  var master: String = "local[*]"
+  var confMaster: String = "local[*]"
+  var confNumRows = 20
+  var confTruncate = 50
   implicit var ctx: Option[ARCContext] = None
 
   def kernelInfo(): KernelInfo =
@@ -72,7 +74,7 @@ final class ArcInterpreter extends Interpreter {
       } else {
         val session = SparkSession
           .builder()
-          .master(master)
+          .master(confMaster)
           .appName("arc-jupyter")
           .config("spark.sql.warehouse.dir", "/tmp/spark-warehouse")
           .config("spark.rdd.compress", true)
@@ -120,6 +122,9 @@ final class ArcInterpreter extends Interpreter {
           case x: String if (x.startsWith("%sql")) => {
             ("sql", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }  
+          case x: String if (x.startsWith("%cypher")) => {
+            ("cypher", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
+          }           
           case x: String if (x.startsWith("%schema")) => {
             ("schema", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }       
@@ -162,8 +167,15 @@ final class ArcInterpreter extends Interpreter {
           case None => None
         }        
 
-        val numRows = commandArgs.getOrElse("numRows", "20").toInt
-        val truncate = commandArgs.getOrElse("truncate", "50").toInt
+
+        val numRows = commandArgs.get("numRows") match {
+          case Some(numRows) => numRows.toInt
+          case None => confNumRows
+        }
+        val truncate = commandArgs.get("truncate") match {
+          case Some(truncate) => truncate.toInt
+          case None => confTruncate
+        }        
 
         interpreter match {
           case "arc" => {
@@ -204,7 +216,10 @@ final class ArcInterpreter extends Interpreter {
             ExecuteResult.Success(
               DisplayData.html(renderHTML(df, numRows, truncate))
             )          
-          }         
+          }   
+          case "cypher" => {
+            ExecuteResult.Error("%cypher not supported with Scala 2.11")      
+          }                
           case "schema" => {
             ExecuteResult.Success(
               DisplayData.text(spark.table(command).schema.prettyJson)
@@ -264,13 +279,17 @@ final class ArcInterpreter extends Interpreter {
           }       
           case "conf" => {
             commandArgs.get("master") match {
-              case Some(m) => {
-                master = m
+              case Some(master) => {
+                confMaster = master
                 spark.stop
               }
               case None =>
             }
-            ExecuteResult.Success(DisplayData.empty)     
+            if (confNumRows != numRows) confNumRows = numRows
+            if (confTruncate != truncate) confTruncate = truncate
+            ExecuteResult.Success(
+              DisplayData.text(s"master: ${confMaster}\nnumRows: ${confNumRows}\ntruncate: ${confTruncate}\n")
+            )  
           }             
           case "version" => {
             ExecuteResult.Success(
