@@ -157,7 +157,7 @@ final class ArcInterpreter extends Interpreter {
         outputHandler match {
           case Some(outputHandler) => {
             interpreter match {
-              case "arc" | "sql" | "summary" => {
+              case "arc" | "sql" | "summary" | "cypher" => {
                 val listener = new ProgressSparkListener(executionId)(outputHandler)         
                 listener.init()(outputHandler)  
                 spark.sparkContext.addSparkListener(listener)
