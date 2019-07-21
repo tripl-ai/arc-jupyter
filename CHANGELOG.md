@@ -1,5 +1,9 @@
 ## Change Log
 
+# 1.3.0
+
+- allow the `%env` and `%conf` magics to support multi-line inputs
+
 # 1.2.0
 
 - add visual progress for cypher queries
