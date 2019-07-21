@@ -141,10 +141,10 @@ final class ArcInterpreter extends Interpreter {
             ("summary", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }              
           case x: String if (x.startsWith("%env")) => {
-            ("env", parseArgs(lines(0)), "")
+            ("env", parseArgs(lines.mkString(" ")), "")
           } 
           case x: String if (x.startsWith("%conf")) => {
-            ("conf", parseArgs(lines(0)), "")
+            ("conf", parseArgs(lines.mkString(" ")), "")
           }                     
           case x: String if (x.startsWith("%version")) => {
             ("version", parseArgs(lines(0)), "")
