@@ -1,5 +1,17 @@
 ## Change Log
 
+# 1.4.0
+
+- update to Spark 2.4.4
+- update to Arc 2.0.1
+- update to Scala 2.12.9
+- downgrade to `almond-sh` 0.6.0 https://github.com/almond-sh/almond/releases/tag/v0.6.0
+
+
+# 1.3.1
+
+- update to `almond-sh` 0.7.0 https://github.com/almond-sh/almond/releases/tag/v0.7.0
+
 # 1.3.0
 
 - allow the `%env` and `%conf` magics to support multi-line inputs
