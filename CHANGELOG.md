@@ -1,5 +1,9 @@
 ## Change Log
 
+# 1.5.0
+
+- update to Arc 2.1.0 to add `SimilarityJoinTransform`
+
 # 1.4.0
 
 - update to Spark 2.4.4
