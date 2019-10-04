@@ -1,9 +1,9 @@
 package ai.tripl.arc.jupyter
 
 import java.util.Properties
-import java.util.UUID
 import java.util.ServiceLoader
 import scala.collection.JavaConverters._
+import scala.util.Random
 
 import almond.interpreter.{Completion, ExecuteResult, Inspection, Interpreter}
 import almond.interpreter.api.{DisplayData, OutputHandler}
@@ -24,17 +24,27 @@ import ai.tripl.arc.config.ArcPipeline
 import ai.tripl.arc.plugins._
 import ai.tripl.arc.util.MetadataUtils
 import ai.tripl.arc.util.SQLUtils
-import ai.tripl.arc.util.log.LoggerFactory 
+import ai.tripl.arc.util.log.LoggerFactory
 
 import java.lang.management.ManagementFactory
 
 final class ArcInterpreter extends Interpreter {
 
-  implicit var spark: SparkSession = _  
+  implicit var spark: SparkSession = _
   var confMaster: String = "local[*]"
   var confNumRows = 20
   var confTruncate = 50
-  implicit var ctx: Option[ARCContext] = None
+  var confCommandLineArgs: Map[String, String] = Map.empty
+  var confStreaming = false
+  var confStreamingDuration = 10
+  var confStreamingFrequency = 1000
+
+  // resolution is slow so dont keep repeating
+  var memoizedPipelineStagePlugins: Option[List[ai.tripl.arc.plugins.PipelineStagePlugin]] = None
+  var memoizedUDFPlugins: Option[List[ai.tripl.arc.plugins.UDFPlugin]] = None
+
+  // cache userData so state can be preserved between executions
+  var memoizedUserData: collection.mutable.Map[String, Object] = collection.mutable.Map.empty
 
   def kernelInfo(): KernelInfo =
     KernelInfo(
@@ -42,7 +52,7 @@ final class ArcInterpreter extends Interpreter {
       ai.tripl.arc.jupyter.BuildInfo.version,
       KernelInfo.LanguageInfo(
         "arc",
-        "1.0",
+        ai.tripl.arc.jupyter.BuildInfo.version,
         "text/arc",
         "arc",
         "text" // ???
@@ -52,13 +62,17 @@ final class ArcInterpreter extends Interpreter {
 
   @volatile private var count = 0
 
+  val alpha = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+  val size = alpha.size
+  def randStr(n:Int) = (1 to n).map(x => alpha(Random.nextInt.abs % size)).mkString
+
   def execute(
     code: String,
     storeHistory: Boolean,
     inputManager: Option[InputManager],
     outputHandler: Option[OutputHandler]
   ): ExecuteResult = {
-    val executionId = UUID.randomUUID.toString
+    val listenerElementHandle = randStr(32)
     var executionListener: Option[ProgressSparkListener] = None
 
     try {
@@ -72,45 +86,28 @@ final class ArcInterpreter extends Interpreter {
       val executeResult = if (runtimeMemorySize > physicalMemorySize) {
         return ExecuteResult.Error(s"Cannot execute as requested JVM memory (-Xmx${runtimeMemorySize}B) exceeds available Docker memory (${physicalMemorySize}B) limit.\nEither decrease the requested JVM memory or increase the Docker memory limit.")
       } else {
-        val session = SparkSession
+        val sessionBuilder = SparkSession
           .builder()
           .master(confMaster)
           .appName("arc-jupyter")
           .config("spark.sql.warehouse.dir", "/tmp/spark-warehouse")
           .config("spark.rdd.compress", true)
-          .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-          .config("spark.driver.maxResultSize", s"${(runtimeMemorySize * 0.8).toLong}b")
           .config("spark.sql.cbo.enabled", true)
-          .getOrCreate()
+          .config("spark.driver.maxResultSize", s"${(runtimeMemorySize * 0.8).toLong}b")
 
+        // add any spark overrides
+        System.getenv.asScala
+          .filter{ case (key, value) => key.startsWith("SPARK_") }
+          .foldLeft(sessionBuilder: SparkSession.Builder){ case (sessionBuilder, (key: String, value: String)) => {
+          sessionBuilder.config(key.replaceAll("_", ".").toLowerCase, value)
+        }}
+
+        val session = sessionBuilder.getOrCreate()
         spark = session
 
         implicit val logger = LoggerFactory.getLogger("")
         val loader = ai.tripl.arc.util.Utils.getContextOrSparkClassLoader
 
-        // store previous value so that the ServiceLoader resolution is not called each run
-        implicit val arcContext = ctx.getOrElse({
-          ctx = Option(ARCContext(
-            jobId=None, 
-            jobName=None, 
-            environment=None, 
-            environmentId=None, 
-            configUri=None, 
-            isStreaming=false, 
-            ignoreEnvironments=true, 
-            commandLineArguments=Map.empty,
-            storageLevel=StorageLevel.MEMORY_AND_DISK_SER,
-            immutableViews=false,
-            dynamicConfigurationPlugins=Nil,
-            lifecyclePlugins=Nil,
-            activeLifecyclePlugins=Nil,
-            pipelineStagePlugins=ServiceLoader.load(classOf[PipelineStagePlugin], loader).iterator().asScala.toList,
-            udfPlugins=ServiceLoader.load(classOf[UDFPlugin], loader).iterator().asScala.toList,
-            userData=collection.mutable.Map.empty
-          ))
-          ctx.get
-        })
-      
         import session.implicits._
 
         // parse input
@@ -121,52 +118,39 @@ final class ArcInterpreter extends Interpreter {
           }
           case x: String if (x.startsWith("%sql")) => {
             ("sql", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
-          }  
+          }
           case x: String if (x.startsWith("%cypher")) => {
             ("cypher", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
-          }           
+          }
           case x: String if (x.startsWith("%schema")) => {
             ("schema", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
-          }       
+          }
           case x: String if (x.startsWith("%printschema")) => {
             ("printschema", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
-          }          
+          }
           case x: String if (x.startsWith("%metadata")) => {
             ("metadata", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
-          }  
+          }
           case x: String if (x.startsWith("%printmetadata")) => {
             ("printmetadata", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
-          }                   
+          }
           case x: String if (x.startsWith("%summary")) => {
             ("summary", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
-          }              
+          }
           case x: String if (x.startsWith("%env")) => {
             ("env", parseArgs(lines.mkString(" ")), "")
-          } 
+          }
           case x: String if (x.startsWith("%conf")) => {
             ("conf", parseArgs(lines.mkString(" ")), "")
-          }                     
+          }
           case x: String if (x.startsWith("%version")) => {
             ("version", parseArgs(lines(0)), "")
-          }                   
+          }
+          case x: String if (x.startsWith("%help")) => {
+            ("help", parseArgs(lines(0)), "")
+          }
           case _ => ("arc", collection.mutable.Map[String, String](), code.trim)
         }
-
-        outputHandler match {
-          case Some(outputHandler) => {
-            interpreter match {
-              case "arc" | "sql" | "summary" => {
-                val listener = new ProgressSparkListener(executionId)(outputHandler)         
-                listener.init()(outputHandler)  
-                spark.sparkContext.addSparkListener(listener)
-                executionListener = Option(listener)                
-              }
-              case _ =>
-            }
-          }
-          case None => None
-        }        
-
 
         val numRows = commandArgs.get("numRows") match {
           case Some(numRows) => numRows.toInt
@@ -175,11 +159,69 @@ final class ArcInterpreter extends Interpreter {
         val truncate = commandArgs.get("truncate") match {
           case Some(truncate) => truncate.toInt
           case None => confTruncate
-        }        
+        }
+        val streamingDuration = commandArgs.get("streamingDuration") match {
+          case Some(streamingDuration) => streamingDuration.toInt
+          case None => confStreamingDuration
+        }
+        val persist = commandArgs.get("persist") match {
+          case Some(persist) => persist.toBoolean
+          case None => false
+        }
+
+        val pipelineStagePlugins = memoizedPipelineStagePlugins match {
+          case Some(pipelineStagePlugins) => pipelineStagePlugins
+          case None => {
+            memoizedPipelineStagePlugins = Option(ServiceLoader.load(classOf[PipelineStagePlugin], loader).iterator().asScala.toList)
+            memoizedPipelineStagePlugins.get
+          }
+        }
+        val udfPlugins = memoizedUDFPlugins match {
+          case Some(udfPlugins) => udfPlugins
+          case None => {
+            memoizedUDFPlugins = Option(ServiceLoader.load(classOf[UDFPlugin], loader).iterator().asScala.toList)
+            memoizedUDFPlugins.get
+          }
+        }
+
+        // store previous value so that the ServiceLoader resolution is not called each run
+        implicit val arcContext = ARCContext(
+          jobId=None,
+          jobName=None,
+          environment=None,
+          environmentId=None,
+          configUri=None,
+          isStreaming=confStreaming,
+          ignoreEnvironments=true,
+          commandLineArguments=confCommandLineArgs,
+          storageLevel=StorageLevel.MEMORY_AND_DISK_SER,
+          immutableViews=false,
+          dynamicConfigurationPlugins=Nil,
+          lifecyclePlugins=Nil,
+          activeLifecyclePlugins=Nil,
+          pipelineStagePlugins=pipelineStagePlugins,
+          udfPlugins=udfPlugins,
+          userData=memoizedUserData
+        )
+
+        outputHandler match {
+          case Some(outputHandler) => {
+            interpreter match {
+              case "arc" | "sql" | "summary" => {
+                val listener = new ProgressSparkListener(listenerElementHandle)(outputHandler, logger)
+                listener.init()(outputHandler)
+                spark.sparkContext.addSparkListener(listener)
+                executionListener = Option(listener)
+              }
+              case _ =>
+            }
+          }
+          case None => None
+        }
 
         interpreter match {
           case "arc" => {
-            
+
             val pipelineEither = ArcPipeline.parseConfig(Left(s"""{"stages": [${command}]}"""), arcContext)
 
             pipelineEither match {
@@ -194,9 +236,9 @@ final class ArcInterpreter extends Interpreter {
                   case _ => {
                     ARC.run(pipeline) match {
                       case Some(df) => {
-                        ExecuteResult.Success(
-                          DisplayData.html(renderHTML(df, numRows, truncate))
-                        )
+                        val result = renderResult(outputHandler, df, numRows, truncate, streamingDuration)
+                        memoizedUserData = arcContext.userData
+                        result
                       }
                       case None => {
                         ExecuteResult.Error("No result.")
@@ -213,70 +255,55 @@ final class ArcInterpreter extends Interpreter {
               case Some(ov) => df.createOrReplaceTempView(ov)
               case None =>
             }
-            ExecuteResult.Success(
-              DisplayData.html(renderHTML(df, numRows, truncate))
-            )          
-          }   
+            if (persist) df.persist(StorageLevel.MEMORY_AND_DISK_SER)
+            renderResult(outputHandler, df, numRows, truncate, streamingDuration)
+          }
           case "cypher" => {
-            ExecuteResult.Error("%cypher not supported with Scala 2.11")      
-          }                
+            ExecuteResult.Error("%cypher not supported with Scala 2.11")
+          }
           case "schema" => {
             ExecuteResult.Success(
               DisplayData.text(spark.table(command).schema.prettyJson)
-            )   
+            )
           }
           case "printschema" => {
             ExecuteResult.Success(
               DisplayData.text(spark.table(command).schema.treeString)
-            )   
-          } 
+            )
+          }
           case "metadata" => {
             val df = MetadataUtils.createMetadataDataframe(spark.table(command))
             commandArgs.get("outputView") match {
               case Some(ov) => df.createOrReplaceTempView(ov)
               case None =>
             }
+            if (persist) df.persist(StorageLevel.MEMORY_AND_DISK_SER)
+            val (html, _) = renderHTML(df, numRows, truncate)
             ExecuteResult.Success(
-              DisplayData.html(renderHTML(df, numRows, truncate))
-            )   
-          }           
+              DisplayData.html(html)
+            )
+          }
           case "printmetadata" => {
             ExecuteResult.Success(
               DisplayData.text(MetadataUtils.makeMetadataFromDataframe(spark.table(command)))
-            )   
-          } 
+            )
+          }
           case "summary" => {
             val df = spark.table(command).summary()
             commandArgs.get("outputView") match {
               case Some(ov) => df.createOrReplaceTempView(ov)
               case None =>
-            }            
+            }
+            if (persist) df.persist(StorageLevel.MEMORY_AND_DISK_SER)
+            val (html, _) = renderHTML(df, numRows, truncate)
             ExecuteResult.Success(
-              DisplayData.html(renderHTML(df, numRows, truncate))
-            )   
-          }           
+              DisplayData.html(html)
+            )
+          }
           case "env" => {
-            // recreate context with the new environment
-            ctx = Option(ARCContext(
-              jobId=arcContext.jobId, 
-              jobName=arcContext.jobName, 
-              environment=arcContext.environment, 
-              environmentId=arcContext.environmentId, 
-              configUri=arcContext.configUri, 
-              isStreaming=arcContext.isStreaming, 
-              ignoreEnvironments=arcContext.ignoreEnvironments, 
-              storageLevel=arcContext.storageLevel,
-              immutableViews=arcContext.immutableViews,
-              commandLineArguments=commandArgs.toMap,
-              dynamicConfigurationPlugins=arcContext.dynamicConfigurationPlugins,
-              lifecyclePlugins=arcContext.lifecyclePlugins,
-              activeLifecyclePlugins=arcContext.activeLifecyclePlugins,
-              pipelineStagePlugins=arcContext.pipelineStagePlugins,
-              udfPlugins=arcContext.udfPlugins,
-              userData=arcContext.userData
-            ))
-            ExecuteResult.Success(DisplayData.empty)     
-          }       
+            confCommandLineArgs = commandArgs.toMap
+            ExecuteResult.Success(DisplayData.text(confCommandLineArgs.map { case (key, value) => s"${key}: ${value}" }.mkString("\n")))
+          }
           case "conf" => {
             commandArgs.get("master") match {
               case Some(master) => {
@@ -285,20 +312,61 @@ final class ArcInterpreter extends Interpreter {
               }
               case None =>
             }
-            if (confNumRows != numRows) confNumRows = numRows
-            if (confTruncate != truncate) confTruncate = truncate
+            confNumRows = numRows
+            confTruncate = truncate
+            commandArgs.get("streaming") match {
+              case Some(streaming) => {
+                try {
+                  val streamingValue = streaming.toBoolean
+                  confStreaming = streamingValue
+                } catch {
+                  case e: Exception =>
+                }
+              }
+              case None =>
+            }
+            commandArgs.get("streamingDuration") match {
+              case Some(streamingDuration) => {
+                try {
+                  val streamingDurationValue = streamingDuration.toInt
+                  confStreamingDuration = streamingDurationValue
+                } catch {
+                  case e: Exception =>
+                }
+              }
+              case None =>
+            }
+            val text = s"""
+            |master: ${confMaster}
+            |numRows: ${confNumRows}
+            |truncate: ${confTruncate}
+            |streaming: ${confStreaming}
+            |streamingDuration: ${confStreamingDuration}
+            """.stripMargin
             ExecuteResult.Success(
-              DisplayData.text(s"master: ${confMaster}\nnumRows: ${confNumRows}\ntruncate: ${confTruncate}\n")
-            )  
-          }             
+              DisplayData.text(text)
+            )
+          }
           case "version" => {
+            val text = s"""
+            |spark: ${spark.version}
+            |arc: ${ai.tripl.arc.ArcBuildInfo.BuildInfo.version}
+            |arc-jupyter: ${ai.tripl.arc.jupyter.BuildInfo.version}
+            |scala: ${scala.util.Properties.versionNumberString}
+            |java: ${System.getProperty("java.runtime.version")}
+            """.stripMargin
             ExecuteResult.Success(
-              DisplayData.text(s"spark: ${spark.version}\narc: ${ai.tripl.arc.ArcBuildInfo.BuildInfo.version}\narc-jupyter: ${ai.tripl.arc.jupyter.BuildInfo.version}\nscala: ${scala.util.Properties.versionNumberString}\njava: ${System.getProperty("java.runtime.version")}")
-            )    
-          }                   
+              DisplayData.text(text)
+            )
+          }
+          case "help" => {
+            ExecuteResult.Success(
+              DisplayData.text(Common.GetHelp)
+            )
+          }
         }
       }
-      
+
       removeListener(spark, executionListener, false)(outputHandler)
       executeResult
     } catch {
@@ -313,22 +381,78 @@ final class ArcInterpreter extends Interpreter {
     listener match {
       case Some(listener) => {
         if (error && outputHandler.nonEmpty) {
-          listener.update(true)(outputHandler.get)
+          listener.update(true, true)(outputHandler.get)
+        } else {
+          listener.update(false, true)(outputHandler.get)
         }
         spark.sparkContext.removeSparkListener(listener)
       }
       case None =>
     }
   }
-  
+
+  def renderResult(outputHandler: Option[OutputHandler], df: DataFrame, numRows: Int, truncate: Int, streamingDuration: Int) = {
+    if (!df.isStreaming) {
+      val (html, _) = renderHTML(df, numRows, truncate)
+      ExecuteResult.Success(
+        DisplayData.html(html)
+      )
+    } else {
+      outputHandler match {
+        case Some(outputHandler) => {
+          // create a random name for the element to update
+          val outputElementHandle = randStr(32)
+
+          // create a random name for the stream
+          val queryName = randStr(32)
+
+          // start a stream
+          val writeStream = df.writeStream
+            .format("memory")
+            .outputMode("append")
+            .queryName(queryName)
+            .start
+
+          // periodically update results on screen
+          val startTime = System.currentTimeMillis
+          var initial = true
+          var length = 0
+          while (System.currentTimeMillis <= startTime + (streamingDuration * 1000) && length < numRows) {
+            if (initial) {
+              outputHandler.html("", outputElementHandle)
+              initial = false
+            } else {
+              val (html, rows) = renderHTML(spark.sql(s"SELECT * FROM ${queryName}"), numRows, truncate)
+              outputHandler.updateHtml(
+                html,
+                outputElementHandle
+              )
+              length = rows
+            }
+            Thread.sleep(confStreamingFrequency)
+          }
+
+          // stop stream and display final result
+          writeStream.stop
+          outputHandler.html("", outputElementHandle)
+          val (html, _) = renderHTML(spark.sql(s"SELECT * FROM ${queryName}"), numRows, truncate)
+          ExecuteResult.Success(
+            DisplayData.html(html)
+          )
+        }
+        case None => ExecuteResult.Error("No result.")
+      }
+    }
+  }
+
   def currentLine(): Int =
     count
 
-  def renderHTML(df: DataFrame, numRows: Int, truncate: Int): String = {
+  def renderHTML(df: DataFrame, numRows: Int, truncate: Int): (String, Int) = {
     import xml.Utility.escape
 
     val data = df.take(numRows)
-    val header = df.schema.fieldNames.toSeq  
+    val header = df.schema.fieldNames.toSeq
 
     val _rows: Seq[Seq[String]] = data.map { row =>
       row.toSeq.map { cell =>
@@ -349,7 +473,7 @@ final class ArcInterpreter extends Interpreter {
       }: Seq[String]
     }
 
-    s""" 
+    (s"""
     <table>
         <tr>
           ${header.map(h => s"<th>${escape(h)}</th>").mkString}
@@ -358,7 +482,8 @@ final class ArcInterpreter extends Interpreter {
           s"<tr>${r.map { c => s"<td>${escape(c)}</td>" }.mkString}</tr>"
         }.mkString}
     </table>
-    """
+    """,
+    data.length)
   }
 
   def parseArgs(input: String): collection.mutable.Map[String, String] = {
