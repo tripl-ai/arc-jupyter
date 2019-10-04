@@ -1,5 +1,11 @@
 ## Change Log
 
+# 1.6.0
+
+- add streaming support.
+- add support for setting Spark configuration variables via environment variables
+- minor UI bug fixes.
+
 # 1.5.0
 
 - update to Arc 2.1.0 to add `SimilarityJoinTransform`
