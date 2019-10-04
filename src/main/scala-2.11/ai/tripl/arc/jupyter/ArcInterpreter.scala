@@ -52,7 +52,7 @@ final class ArcInterpreter extends Interpreter {
       ai.tripl.arc.jupyter.BuildInfo.version,
       KernelInfo.LanguageInfo(
         "arc",
-        "1.0",
+        ai.tripl.arc.jupyter.BuildInfo.version,
         "text/arc",
         "arc",
         "text" // ???
@@ -146,6 +146,9 @@ final class ArcInterpreter extends Interpreter {
           case x: String if (x.startsWith("%version")) => {
             ("version", parseArgs(lines(0)), "")
           }
+          case x: String if (x.startsWith("%help")) => {
+            ("help", parseArgs(lines(0)), "")
+          }
           case _ => ("arc", collection.mutable.Map[String, String](), code.trim)
         }
 
@@ -160,6 +163,10 @@ final class ArcInterpreter extends Interpreter {
         val streamingDuration = commandArgs.get("streamingDuration") match {
           case Some(streamingDuration) => streamingDuration.toInt
           case None => confStreamingDuration
+        }
+        val persist = commandArgs.get("persist") match {
+          case Some(persist) => persist.toBoolean
+          case None => false
         }
 
         val pipelineStagePlugins = memoizedPipelineStagePlugins match {
@@ -248,16 +255,7 @@ final class ArcInterpreter extends Interpreter {
               case Some(ov) => df.createOrReplaceTempView(ov)
               case None =>
             }
-            commandArgs.get("persist") match {
-              case Some(persist) => {
-                try {
-                  if (persist.toBoolean) df.persist(StorageLevel.MEMORY_AND_DISK_SER)
-                } catch {
-                  case _: Exception =>
-                }
-              }
-              case None =>
-            }
+            if (persist) df.persist(StorageLevel.MEMORY_AND_DISK_SER)
             renderResult(outputHandler, df, numRows, truncate, streamingDuration)
           }
           case "cypher" => {
@@ -279,6 +277,7 @@ final class ArcInterpreter extends Interpreter {
               case Some(ov) => df.createOrReplaceTempView(ov)
               case None =>
             }
+            if (persist) df.persist(StorageLevel.MEMORY_AND_DISK_SER)
             val (html, _) = renderHTML(df, numRows, truncate)
             ExecuteResult.Success(
               DisplayData.html(html)
@@ -295,6 +294,7 @@ final class ArcInterpreter extends Interpreter {
               case Some(ov) => df.createOrReplaceTempView(ov)
               case None =>
             }
+            if (persist) df.persist(StorageLevel.MEMORY_AND_DISK_SER)
             val (html, _) = renderHTML(df, numRows, truncate)
             ExecuteResult.Success(
               DisplayData.html(html)
@@ -312,8 +312,8 @@ final class ArcInterpreter extends Interpreter {
               }
               case None =>
             }
-            if (confNumRows != numRows) confNumRows = numRows
-            if (confTruncate != truncate) confTruncate = truncate
+            confNumRows = numRows
+            confTruncate = truncate
             commandArgs.get("streaming") match {
               case Some(streaming) => {
                 try {
@@ -336,13 +336,32 @@ final class ArcInterpreter extends Interpreter {
               }
               case None =>
             }
+            val text = s"""
+            |master: ${confMaster}
+            |numRows: ${confNumRows}
+            |truncate: ${confTruncate}
+            |streaming: ${confStreaming}
+            |streamingDuration: ${confStreamingDuration}
+            """.stripMargin
             ExecuteResult.Success(
-              DisplayData.text(s"master: ${confMaster}\nnumRows: ${confNumRows}\ntruncate: ${confTruncate}\nstreaming: ${confStreaming}\nstreamingDuration: ${confStreamingDuration}\n")
+              DisplayData.text(text)
             )
           }
           case "version" => {
+            val text = s"""
+            |spark: ${spark.version}
+            |arc: ${ai.tripl.arc.ArcBuildInfo.BuildInfo.version}
+            |arc-jupyter: ${ai.tripl.arc.jupyter.BuildInfo.version}
+            |scala: ${scala.util.Properties.versionNumberString}
+            |java: ${System.getProperty("java.runtime.version")}
+            """.stripMargin
             ExecuteResult.Success(
-              DisplayData.text(s"spark: ${spark.version}\narc: ${ai.tripl.arc.ArcBuildInfo.BuildInfo.version}\narc-jupyter: ${ai.tripl.arc.jupyter.BuildInfo.version}\nscala: ${scala.util.Properties.versionNumberString}\njava: ${System.getProperty("java.runtime.version")}")
+              DisplayData.text(text)
+            )
+          }
+          case "help" => {
+            ExecuteResult.Success(
+              DisplayData.text(Common.GetHelp)
             )
           }
         }
