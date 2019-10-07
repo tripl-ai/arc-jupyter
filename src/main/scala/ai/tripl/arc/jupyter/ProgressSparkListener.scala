@@ -15,7 +15,7 @@ import scala.concurrent.duration.FiniteDuration
 import scala.collection.JavaConverters._
 import scala.util.Try
 
-final class ProgressSparkListener(executionId: String)(implicit outputHandler: OutputHandler, logger: Logger) extends SparkListener {
+final class ProgressSparkListener(executionId: String, isJupyterLab: Boolean)(implicit outputHandler: OutputHandler, logger: Logger) extends SparkListener {
 
   val rateLimit = Duration(200, MILLISECONDS).toMillis
   var isRunning = new AtomicBoolean(false)
@@ -96,14 +96,45 @@ final class ProgressSparkListener(executionId: String)(implicit outputHandler: O
       ""
     }
 
-    outputHandler.updateHtml(
-      s"""<div class="progress arc-background">
-          |  <div class="progress-bar arc-complete ${statusClass}" style="width: $donePct%;">${statusText}</div>
-          |  <div class="progress-bar arc-running ${statusClass}" style="width: $runningPct%;"></div>
-          |</div>
-          |""".stripMargin,
-      executionId
-    )
+    // jupyterlab has a different format
+    if (isJupyterLab) {
+      if (removeListener) {
+        if (error) {
+          outputHandler.updateHtml(
+            s"""<div class="progress">
+                |  <div class="progress-bar-danger" style="width: $donePct%;">${statusText}</div>
+                |</div>
+                |""".stripMargin,
+            executionId
+          )
+        } else {
+          outputHandler.updateHtml(
+            s"""<div class="progress">
+                |  <div class="progress-bar-success" style="width: $donePct%;">${statusText}</div>
+                |</div>
+                |""".stripMargin,
+            executionId
+          )
+        }
+      } else {
+        outputHandler.updateHtml(
+          s"""<div class="progress">
+              |  <div class="progress-bar-info" style="width: $donePct%;">${statusText}</div>
+              |</div>
+              |""".stripMargin,
+          executionId
+        )
+      }
+    } else {
+      outputHandler.updateHtml(
+        s"""<div class="progress arc-background">
+            |  <div class="progress-bar arc-complete ${statusClass}" style="width: $donePct%;">${statusText}</div>
+            |  <div class="progress-bar arc-running ${statusClass}" style="width: $runningPct%;"></div>
+            |</div>
+            |""".stripMargin,
+        executionId
+      )
+    }
   }
 
   // rate limiting was introduced as the UI updates started to hang if updates were too frequent

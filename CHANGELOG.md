@@ -1,5 +1,10 @@
 ## Change Log
 
+# 1.6.1
+
+- progress bar changes to support JupyterLab style.
+- add plugin versions to `%version` output.
+
 # 1.6.0
 
 - add streaming support.

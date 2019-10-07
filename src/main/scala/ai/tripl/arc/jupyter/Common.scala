@@ -1,5 +1,9 @@
 package ai.tripl.arc.jupyter
 
+import org.apache.spark.sql.SparkSession
+
+import ai.tripl.arc.api.API.ARCContext
+
 object Common {
 
   def GetHelp(): String = {
@@ -50,6 +54,22 @@ object Common {
     |truncate:          The maximum number of characters displayed in a string result (integer)
     |streaming:         Set the notebook into streaming mode (boolean)
     |streamingDuration: How many seconds to execute a streaming stage before stopping (will stop if numRows is reached first).
+    """.stripMargin
+  }
+
+  def GetVersion()(implicit spark: SparkSession, arcContext: ARCContext): String = {
+    s"""
+    |spark: ${spark.version}
+    |arc: ${ai.tripl.arc.ArcBuildInfo.BuildInfo.version}
+    |arc-jupyter: ${ai.tripl.arc.jupyter.BuildInfo.version}
+    |scala: ${scala.util.Properties.versionNumberString}
+    |java: ${System.getProperty("java.runtime.version")}
+    |pipelinePlugins: [
+    |${arcContext.pipelineStagePlugins.map(c => s"- ${c.getClass.getName}:${c.version}").mkString("\n")}
+    |]
+    |udfPlugins: [
+    |${arcContext.udfPlugins.map(c => s"- ${c.getClass.getName}:${c.version}").mkString("\n")}
+    |]    
     """.stripMargin
   }
 }
