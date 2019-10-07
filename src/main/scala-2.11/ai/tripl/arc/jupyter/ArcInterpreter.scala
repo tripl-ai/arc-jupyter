@@ -31,6 +31,7 @@ import java.lang.management.ManagementFactory
 final class ArcInterpreter extends Interpreter {
 
   implicit var spark: SparkSession = _
+
   var confMaster: String = "local[*]"
   var confNumRows = 20
   var confTruncate = 50
@@ -38,6 +39,9 @@ final class ArcInterpreter extends Interpreter {
   var confStreaming = false
   var confStreamingDuration = 10
   var confStreamingFrequency = 1000
+  var udfsRegistered = false
+
+  var isJupyterLab: Option[Boolean] = None
 
   // resolution is slow so dont keep repeating
   var memoizedPipelineStagePlugins: Option[List[ai.tripl.arc.plugins.PipelineStagePlugin]] = None
@@ -109,6 +113,14 @@ final class ArcInterpreter extends Interpreter {
         val loader = ai.tripl.arc.util.Utils.getContextOrSparkClassLoader
 
         import session.implicits._
+
+        // detect jupyterlab
+        val jupyterLab = isJupyterLab.getOrElse(
+          scala.util.Properties.envOrNone("JUPYTER_ENABLE_LAB") match {
+            case Some(j) => if (j == "yes") true else false
+            case None => false
+          }
+        )
 
         // parse input
         val lines = code.trim.split("\n")
@@ -204,11 +216,17 @@ final class ArcInterpreter extends Interpreter {
           userData=memoizedUserData
         )
 
+        // register udfs once
+        if (!udfsRegistered) {
+          ai.tripl.arc.udf.UDF.registerUDFs()(spark, logger, arcContext)
+          udfsRegistered = true
+        }
+
         outputHandler match {
           case Some(outputHandler) => {
             interpreter match {
               case "arc" | "sql" | "summary" => {
-                val listener = new ProgressSparkListener(listenerElementHandle)(outputHandler, logger)
+                val listener = new ProgressSparkListener(listenerElementHandle, jupyterLab)(outputHandler, logger)
                 listener.init()(outputHandler)
                 spark.sparkContext.addSparkListener(listener)
                 executionListener = Option(listener)
@@ -348,15 +366,8 @@ final class ArcInterpreter extends Interpreter {
             )
           }
           case "version" => {
-            val text = s"""
-            |spark: ${spark.version}
-            |arc: ${ai.tripl.arc.ArcBuildInfo.BuildInfo.version}
-            |arc-jupyter: ${ai.tripl.arc.jupyter.BuildInfo.version}
-            |scala: ${scala.util.Properties.versionNumberString}
-            |java: ${System.getProperty("java.runtime.version")}
-            """.stripMargin
             ExecuteResult.Success(
-              DisplayData.text(text)
+              DisplayData.text(Common.GetVersion())
             )
           }
           case "help" => {
