@@ -101,7 +101,7 @@ final class ArcInterpreter extends Interpreter {
 
         // add any spark overrides
         System.getenv.asScala
-          .filter{ case (key, value) => key.startsWith("SPARK_") }
+          .filter{ case (key, value) => key.startsWith("spark_") }
           .foldLeft(sessionBuilder: SparkSession.Builder){ case (sessionBuilder, (key: String, value: String)) => {
           sessionBuilder.config(key.replaceAll("_", ".").toLowerCase, value)
         }}
@@ -290,7 +290,7 @@ final class ArcInterpreter extends Interpreter {
             )
           }
           case "metadata" => {
-            val df = MetadataUtils.createMetadataDataframe(spark.table(command))
+            val df = Common.createPrettyMetadataDataframe(spark.table(command))
             commandArgs.get("outputView") match {
               case Some(ov) => df.createOrReplaceTempView(ov)
               case None =>

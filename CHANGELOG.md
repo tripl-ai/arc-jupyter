@@ -1,5 +1,11 @@
 ## Change Log
 
+# 1.7.0
+
+- change `%metadata` do show easier to read output format for any `metadata` columns.
+- allow any environment variable starting with `spark_` to set [Spark configuration variables](https://spark.apache.org/docs/latest/configuration.html) e.g. `spark_sql_inMemoryColumnarStorage_compressed` to set `spark.sql.inMemoryColumnarStorage.compressed` (case sensitive).
+- update to Arc 2.3.0.
+
 # 1.6.1
 
 - progress bar changes to support JupyterLab style.
