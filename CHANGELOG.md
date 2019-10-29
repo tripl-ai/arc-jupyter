@@ -1,5 +1,9 @@
 ## Change Log
 
+# 1.7.1
+
+- update to Arc 2.3.1
+
 # 1.7.0
 
 - change `%metadata` do show easier to read output format for any `metadata` columns.
