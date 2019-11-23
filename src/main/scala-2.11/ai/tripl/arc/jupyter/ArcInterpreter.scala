@@ -18,6 +18,8 @@ import org.apache.spark.sql._
 import org.apache.log4j.{Level, Logger}
 import org.apache.spark.storage.StorageLevel
 
+import com.typesafe.config._
+
 import ai.tripl.arc.ARC
 import ai.tripl.arc.api.API.ARCContext
 import ai.tripl.arc.config.ArcPipeline
@@ -134,6 +136,9 @@ final class ArcInterpreter extends Interpreter {
           case x: String if (x.startsWith("%cypher")) => {
             ("cypher", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
+          case x: String if (x.startsWith("%configplugin")) => {
+            ("configplugin", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
+          }               
           case x: String if (x.startsWith("%schema")) => {
             ("schema", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
@@ -208,7 +213,7 @@ final class ArcInterpreter extends Interpreter {
           commandLineArguments=confCommandLineArgs,
           storageLevel=StorageLevel.MEMORY_AND_DISK_SER,
           immutableViews=false,
-          dynamicConfigurationPlugins=Nil,
+          dynamicConfigurationPlugins=ServiceLoader.load(classOf[DynamicConfigurationPlugin], loader).iterator().asScala.toList,
           lifecyclePlugins=Nil,
           activeLifecyclePlugins=Nil,
           pipelineStagePlugins=pipelineStagePlugins,
@@ -279,6 +284,21 @@ final class ArcInterpreter extends Interpreter {
           case "cypher" => {
             ExecuteResult.Error("%cypher not supported with Scala 2.11")
           }
+          case "configplugin" => {
+            val config = ConfigFactory.parseString(s"""{"plugins": {"config": [${command}]}}""", ConfigParseOptions.defaults().setSyntax(ConfigSyntax.CONF))
+            val dynamicConfigsOrErrors = ai.tripl.arc.config.Plugins.resolveConfigPlugins(config, "plugins.config", arcContext.dynamicConfigurationPlugins)(spark, logger, arcContext)
+            dynamicConfigsOrErrors match {
+              case Left(errors) => ExecuteResult.Error(ai.tripl.arc.config.Error.pipelineSimpleErrorMsg(errors))
+              case Right(dynamicConfigs) => {
+                val dynamicConfigsConf = dynamicConfigs.reduceRight[Config]{ case (c1, c2) => c1.withFallback(c2) }
+                val entryMap = dynamicConfigsConf.entrySet.asScala.map { entry =>
+                  entry.getKey -> entry.getValue.unwrapped.toString
+                }.toMap
+                confCommandLineArgs = confCommandLineArgs ++ entryMap
+              }
+              ExecuteResult.Success(DisplayData.text(confCommandLineArgs.map { case (key, value) => s"${key}: ${value}" }.mkString("\n")))
+            }
+          }          
           case "schema" => {
             ExecuteResult.Success(
               DisplayData.text(spark.table(command).schema.prettyJson)

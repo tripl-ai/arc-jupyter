@@ -95,12 +95,12 @@ object Common {
     |arc-jupyter: ${ai.tripl.arc.jupyter.BuildInfo.version}
     |scala: ${scala.util.Properties.versionNumberString}
     |java: ${System.getProperty("java.runtime.version")}
+    |dynamicConfigurationPlugins: 
+    |${arcContext.dynamicConfigurationPlugins.map(c => s" - ${c.getClass.getName}:${c.version}").mkString("\n")}
     |pipelinePlugins: [
-    |${arcContext.pipelineStagePlugins.map(c => s"- ${c.getClass.getName}:${c.version}").mkString("\n")}
-    |]
-    |udfPlugins: [
-    |${arcContext.udfPlugins.map(c => s"- ${c.getClass.getName}:${c.version}").mkString("\n")}
-    |]    
+    |${arcContext.pipelineStagePlugins.map(c => s" - ${c.getClass.getName}:${c.version}").mkString("\n")}
+    |udfPlugins: 
+    |${arcContext.udfPlugins.map(c => s" - ${c.getClass.getName}:${c.version}").mkString("\n")}
     """.stripMargin
   }
 }
