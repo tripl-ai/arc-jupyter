@@ -1,5 +1,10 @@
 ## Change Log
 
+# 1.8.1
+
+- update to Arc 2.4.0
+- change formatting of numbers to remove scientific notation
+
 # 1.7.1
 
 - update to Arc 2.3.1
