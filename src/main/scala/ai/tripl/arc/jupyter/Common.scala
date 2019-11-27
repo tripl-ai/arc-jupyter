@@ -96,11 +96,11 @@ object Common {
     |scala: ${scala.util.Properties.versionNumberString}
     |java: ${System.getProperty("java.runtime.version")}
     |dynamicConfigurationPlugins: 
-    |${arcContext.dynamicConfigurationPlugins.map(c => s" - ${c.getClass.getName}:${c.version}").mkString("\n")}
+    |${arcContext.dynamicConfigurationPlugins.map(c => s" - ${c.getClass.getName}:${c.version}").sorted.mkString("\n")}
     |pipelinePlugins: [
-    |${arcContext.pipelineStagePlugins.map(c => s" - ${c.getClass.getName}:${c.version}").mkString("\n")}
+    |${arcContext.pipelineStagePlugins.map(c => s" - ${c.getClass.getName}:${c.version}").sorted.mkString("\n")}
     |udfPlugins: 
-    |${arcContext.udfPlugins.map(c => s" - ${c.getClass.getName}:${c.version}").mkString("\n")}
+    |${arcContext.udfPlugins.map(c => s" - ${c.getClass.getName}:${c.version}").sorted.mkString("\n")}
     """.stripMargin
   }
 }

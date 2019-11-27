@@ -17,6 +17,8 @@ import org.apache.commons.lang3.time.DurationFormatUtils
 import org.apache.spark.sql._
 import org.apache.log4j.{Level, Logger}
 import org.apache.spark.storage.StorageLevel
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.types._
 
 import com.typesafe.config._
 
@@ -92,6 +94,7 @@ final class ArcInterpreter extends Interpreter {
       val executeResult = if (runtimeMemorySize > physicalMemorySize) {
         return ExecuteResult.Error(s"Cannot execute as requested JVM memory (-Xmx${runtimeMemorySize}B) exceeds available Docker memory (${physicalMemorySize}B) limit.\nEither decrease the requested JVM memory or increase the Docker memory limit.")
       } else {
+
         val sessionBuilder = SparkSession
           .builder()
           .master(confMaster)
@@ -138,7 +141,10 @@ final class ArcInterpreter extends Interpreter {
           }
           case x: String if (x.startsWith("%configplugin")) => {
             ("configplugin", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
-          }               
+          }
+          case x: String if (x.startsWith("%lifecycleplugin")) => {
+            ("lifecycleplugin", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
+          }
           case x: String if (x.startsWith("%schema")) => {
             ("schema", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
@@ -162,9 +168,6 @@ final class ArcInterpreter extends Interpreter {
           }
           case x: String if (x.startsWith("%version")) => {
             ("version", parseArgs(lines(0)), "")
-          }
-          case x: String if (x.startsWith("%help")) => {
-            ("help", parseArgs(lines(0)), "")
           }
           case _ => ("arc", collection.mutable.Map[String, String](), code.trim)
         }
@@ -279,7 +282,7 @@ final class ArcInterpreter extends Interpreter {
               case None =>
             }
             if (persist) df.persist(StorageLevel.MEMORY_AND_DISK_SER)
-            renderResult(outputHandler, df, numRows, truncate, streamingDuration)
+            renderResult(outputHandler, df, numRows, truncate, confStreamingDuration)
           }
           case "cypher" => {
             ExecuteResult.Error("%cypher not supported with Scala 2.11")
@@ -298,7 +301,7 @@ final class ArcInterpreter extends Interpreter {
               }
               ExecuteResult.Success(DisplayData.text(confCommandLineArgs.map { case (key, value) => s"${key}: ${value}" }.mkString("\n")))
             }
-          }          
+          }
           case "schema" => {
             ExecuteResult.Success(
               DisplayData.text(spark.table(command).schema.prettyJson)
@@ -316,9 +319,8 @@ final class ArcInterpreter extends Interpreter {
               case None =>
             }
             if (persist) df.persist(StorageLevel.MEMORY_AND_DISK_SER)
-            val (html, _) = renderHTML(df, numRows, truncate)
             ExecuteResult.Success(
-              DisplayData.html(html)
+              DisplayData.html(renderHTML(df, numRows, truncate))
             )
           }
           case "printmetadata" => {
@@ -333,14 +335,13 @@ final class ArcInterpreter extends Interpreter {
               case None =>
             }
             if (persist) df.persist(StorageLevel.MEMORY_AND_DISK_SER)
-            val (html, _) = renderHTML(df, numRows, truncate)
             ExecuteResult.Success(
-              DisplayData.html(html)
+              DisplayData.html(renderHTML(df, numRows, truncate))
             )
           }
           case "env" => {
             confCommandLineArgs = commandArgs.toMap
-            ExecuteResult.Success(DisplayData.text(confCommandLineArgs.map { case (key, value) => s"${key}: ${value}" }.mkString("\n")))
+            ExecuteResult.Success(DisplayData.text(confCommandLineArgs.map { case (key, value) => s"${key}: ${value}" }.toList.sorted.mkString("\n")))
           }
           case "conf" => {
             commandArgs.get("master") match {
@@ -350,8 +351,8 @@ final class ArcInterpreter extends Interpreter {
               }
               case None =>
             }
-            confNumRows = numRows
-            confTruncate = truncate
+            if (confNumRows != numRows) confNumRows = numRows
+            if (confTruncate != truncate) confTruncate = truncate
             commandArgs.get("streaming") match {
               case Some(streaming) => {
                 try {
@@ -424,9 +425,8 @@ final class ArcInterpreter extends Interpreter {
 
   def renderResult(outputHandler: Option[OutputHandler], df: DataFrame, numRows: Int, truncate: Int, streamingDuration: Int) = {
     if (!df.isStreaming) {
-      val (html, _) = renderHTML(df, numRows, truncate)
       ExecuteResult.Success(
-        DisplayData.html(html)
+        DisplayData.html(renderHTML(df, numRows, truncate))
       )
     } else {
       outputHandler match {
@@ -447,18 +447,18 @@ final class ArcInterpreter extends Interpreter {
           // periodically update results on screen
           val startTime = System.currentTimeMillis
           var initial = true
-          var length = 0
+          var length = 0L
           while (System.currentTimeMillis <= startTime + (streamingDuration * 1000) && length < numRows) {
             if (initial) {
               outputHandler.html("", outputElementHandle)
               initial = false
             } else {
-              val (html, rows) = renderHTML(spark.sql(s"SELECT * FROM ${queryName}"), numRows, truncate)
+              val df = spark.sql(s"SELECT * FROM ${queryName}")
               outputHandler.updateHtml(
-                html,
+                renderHTML(df, numRows, truncate),
                 outputElementHandle
               )
-              length = rows
+              length = df.count
             }
             Thread.sleep(confStreamingFrequency)
           }
@@ -466,9 +466,8 @@ final class ArcInterpreter extends Interpreter {
           // stop stream and display final result
           writeStream.stop
           outputHandler.html("", outputElementHandle)
-          val (html, _) = renderHTML(spark.sql(s"SELECT * FROM ${queryName}"), numRows, truncate)
           ExecuteResult.Success(
-            DisplayData.html(html)
+            DisplayData.html(renderHTML(spark.sql(s"SELECT * FROM ${queryName}"), numRows, truncate))
           )
         }
         case None => ExecuteResult.Error("No result.")
@@ -479,19 +478,33 @@ final class ArcInterpreter extends Interpreter {
   def currentLine(): Int =
     count
 
-  def renderHTML(df: DataFrame, numRows: Int, truncate: Int): (String, Int) = {
+  def renderHTML(df: DataFrame, numRows: Int, truncate: Int): String = {
     import xml.Utility.escape
 
-    val data = df.take(numRows)
     val header = df.schema.fieldNames.toSeq
 
-    val _rows: Seq[Seq[String]] = data.map { row =>
+    // this code has come from the spark Dataset class:
+    val castCols = df.schema.map { field =>
+      // Since binary types in top-level schema fields have a specific format to print,
+      // so we do not cast them to strings here.
+      field.dataType match {
+        case BinaryType => col(field.name)
+        // replace commas (from format_number), replace any trailing zeros (but leave at least one character after the .)
+        case DoubleType => regexp_replace(regexp_replace(regexp_replace(format_number(col(field.name), 10),",",""),"(?<=.[0-9]{2})0+$",""),"^\\.","0.")
+        case x: DecimalType => regexp_replace(regexp_replace(regexp_replace(format_number(col(field.name), x.scale),",",""),"(?<=.[0-9]{2})0+$",""),"^\\.","0.")
+        case _ => col(field.name).cast(StringType)
+      }
+    }
+    val data = df.select(castCols: _*).take(numRows)
+
+    // For array values, replace Seq and Array with square brackets
+    // For cells that are beyond `truncate` characters, replace it with the
+    // first `truncate-3` and "..."
+    val rows = data.map { row =>
       row.toSeq.map { cell =>
         val str = cell match {
           case null => "null"
           case binary: Array[Byte] => binary.map("%02X".format(_)).mkString("[", " ", "]")
-          case array: Array[_] => array.mkString("[", ", ", "]")
-          case seq: Seq[_] => seq.mkString("[", ", ", "]")
           case _ => cell.toString
         }
         if (truncate > 0 && str.length > truncate) {
@@ -504,17 +517,7 @@ final class ArcInterpreter extends Interpreter {
       }: Seq[String]
     }
 
-    (s"""
-    <table>
-        <tr>
-          ${header.map(h => s"<th>${escape(h)}</th>").mkString}
-        </tr>
-        ${_rows.map { r =>
-          s"<tr>${r.map { c => s"<td>${escape(c)}</td>" }.mkString}</tr>"
-        }.mkString}
-    </table>
-    """,
-    data.length)
+    s"""<table><tr>${header.map(h => s"<th>${escape(h)}</th>").mkString}</tr>${rows.map { row => s"<tr>${row.map { cell => s"<td>${escape(cell)}</td>" }.mkString}</tr>"}.mkString}</table>"""
   }
 
   def parseArgs(input: String): collection.mutable.Map[String, String] = {
