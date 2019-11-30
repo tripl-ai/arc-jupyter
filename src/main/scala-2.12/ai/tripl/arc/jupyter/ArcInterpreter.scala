@@ -7,6 +7,8 @@ import scala.util.Random
 
 import almond.interpreter.{Completion, ExecuteResult, Inspection, Interpreter}
 import almond.interpreter.api.{DisplayData, OutputHandler}
+import scala.concurrent.duration.Duration
+import scala.concurrent.{Await, ExecutionContext, Future}
 import almond.interpreter.input.InputManager
 import almond.protocol.internal.ExtraCodecs._
 import almond.protocol.KernelInfo
@@ -34,14 +36,21 @@ import ai.tripl.arc.util.log.LoggerFactory
 
 import java.lang.management.ManagementFactory
 
+case class ConfigValue (
+  secret: Boolean,
+  value: String
+)
+
 final class ArcInterpreter extends Interpreter {
 
   implicit var spark: SparkSession = _
 
+  val secretPattern = """"(token|signature|accessKey|secret|secretAccessKey)".*\$\{.*\}""".r
+
   var confMaster: String = "local[*]"
   var confNumRows = 20
   var confTruncate = 50
-  var confCommandLineArgs: Map[String, String] = Map.empty
+  var confCommandLineArgs: Map[String, ConfigValue] = Map.empty
   var confStreaming = false
   var confStreamingDuration = 10
   var confStreamingFrequency = 1000
@@ -52,6 +61,7 @@ final class ArcInterpreter extends Interpreter {
   // resolution is slow so dont keep repeating
   var memoizedPipelineStagePlugins: Option[List[ai.tripl.arc.plugins.PipelineStagePlugin]] = None
   var memoizedUDFPlugins: Option[List[ai.tripl.arc.plugins.UDFPlugin]] = None
+  var memoizedDynamicConfigPlugins: Option[List[ai.tripl.arc.plugins.DynamicConfigurationPlugin]] = None
 
   // cache userData so state can be preserved between executions
   var memoizedUserData: collection.mutable.Map[String, Object] = collection.mutable.Map.empty
@@ -165,6 +175,9 @@ final class ArcInterpreter extends Interpreter {
           case x: String if (x.startsWith("%env")) => {
             ("env", parseArgs(lines.mkString(" ")), "")
           }
+          case x: String if (x.startsWith("%secret")) => {
+            ("secret", parseArgs(lines.mkString(" ")), lines.drop(1).mkString("\n"))
+          }          
           case x: String if (x.startsWith("%conf")) => {
             ("conf", parseArgs(lines.mkString(" ")), "")
           }
@@ -191,6 +204,7 @@ final class ArcInterpreter extends Interpreter {
           case None => false
         }
 
+        // store previous values so that the ServiceLoader resolution is not called each run
         val pipelineStagePlugins = memoizedPipelineStagePlugins match {
           case Some(pipelineStagePlugins) => pipelineStagePlugins
           case None => {
@@ -205,8 +219,14 @@ final class ArcInterpreter extends Interpreter {
             memoizedUDFPlugins.get
           }
         }
+        val dynamicConfigsPlugins = memoizedDynamicConfigPlugins match {
+          case Some(dynamicConfigsPlugins) => dynamicConfigsPlugins
+          case None => {
+            memoizedDynamicConfigPlugins = Option(ServiceLoader.load(classOf[DynamicConfigurationPlugin], loader).iterator().asScala.toList)
+            memoizedDynamicConfigPlugins.get
+          }
+        }        
 
-        // store previous value so that the ServiceLoader resolution is not called each run
         implicit val arcContext = ARCContext(
           jobId=None,
           jobName=None,
@@ -215,10 +235,10 @@ final class ArcInterpreter extends Interpreter {
           configUri=None,
           isStreaming=confStreaming,
           ignoreEnvironments=true,
-          commandLineArguments=confCommandLineArgs,
+          commandLineArguments=confCommandLineArgs.map { case (key, config) => (key, config.value) },
           storageLevel=StorageLevel.MEMORY_AND_DISK_SER,
           immutableViews=false,
-          dynamicConfigurationPlugins=ServiceLoader.load(classOf[DynamicConfigurationPlugin], loader).iterator().asScala.toList,
+          dynamicConfigurationPlugins=dynamicConfigsPlugins,
           lifecyclePlugins=Nil,
           activeLifecyclePlugins=Nil,
           pipelineStagePlugins=pipelineStagePlugins,
@@ -249,31 +269,36 @@ final class ArcInterpreter extends Interpreter {
 
         interpreter match {
           case "arc" => {
+            // ensure that the input text does not have secrets
+            secretPattern.findFirstIn(command) match {
+              case None => ExecuteResult.Error("Secret found in input. Use %secret to define to prevent accidental leaks.")
+              case Some(_) => {
+                val pipelineEither = ArcPipeline.parseConfig(Left(s"""{"stages": [${command}]}"""), arcContext)
 
-            val pipelineEither = ArcPipeline.parseConfig(Left(s"""{"stages": [${command}]}"""), arcContext)
-
-            pipelineEither match {
-              case Left(errors) => {
-                ExecuteResult.Error(ai.tripl.arc.config.Error.pipelineSimpleErrorMsg(errors))
-              }
-              case Right((pipeline, _)) => {
-                pipeline.stages.length match {
-                  case 0 => {
-                    ExecuteResult.Error("No stages found.")
+                pipelineEither match {
+                  case Left(errors) => {
+                    ExecuteResult.Error(ai.tripl.arc.config.Error.pipelineSimpleErrorMsg(errors))
                   }
-                  case _ => {
-                    ARC.run(pipeline) match {
-                      case Some(df) => {
-                        val result = renderResult(outputHandler, df, numRows, truncate, streamingDuration)
-                        memoizedUserData = arcContext.userData
-                        result
+                  case Right((pipeline, _)) => {
+                    pipeline.stages.length match {
+                      case 0 => {
+                        ExecuteResult.Error("No stages found.")
                       }
-                      case None => {
-                        ExecuteResult.Error("No result.")
+                      case _ => {
+                        ARC.run(pipeline) match {
+                          case Some(df) => {
+                            val result = renderResult(outputHandler, df, numRows, truncate, streamingDuration)
+                            memoizedUserData = arcContext.userData
+                            result
+                          }
+                          case None => {
+                            ExecuteResult.Error("No result.")
+                          }
+                        }
                       }
                     }
                   }
-                }
+                }                
               }
             }
           }
@@ -310,11 +335,11 @@ final class ArcInterpreter extends Interpreter {
               case Right(dynamicConfigs) => {
                 val dynamicConfigsConf = dynamicConfigs.reduceRight[Config]{ case (c1, c2) => c1.withFallback(c2) }
                 val entryMap = dynamicConfigsConf.entrySet.asScala.map { entry =>
-                  entry.getKey -> entry.getValue.unwrapped.toString
+                  entry.getKey -> ConfigValue(false, entry.getValue.unwrapped.toString)
                 }.toMap
                 confCommandLineArgs = confCommandLineArgs ++ entryMap
               }
-              ExecuteResult.Success(DisplayData.text(confCommandLineArgs.map { case (key, value) => s"${key}: ${value}" }.mkString("\n")))
+              ExecuteResult.Success(DisplayData.text(confCommandLineArgs.map { case (key, configValue) => s"${key}: ${if (configValue.secret) "*" * configValue.value.length else configValue.value }" }.toList.sorted.mkString("\n")))
             }
           }
           case "schema" => {
@@ -355,9 +380,24 @@ final class ArcInterpreter extends Interpreter {
             )
           }
           case "env" => {
-            confCommandLineArgs = commandArgs.toMap
-            ExecuteResult.Success(DisplayData.text(confCommandLineArgs.map { case (key, value) => s"${key}: ${value}" }.toList.sorted.mkString("\n")))
+            if (!commandArgs.isEmpty) {
+              confCommandLineArgs = commandArgs.map { case (key, value) => key -> ConfigValue(false, value) }.toMap
+            }
+            ExecuteResult.Success(DisplayData.text(confCommandLineArgs.map { case (key, configValue) => s"${key}: ${if (configValue.secret) "*" * configValue.value.length else configValue.value }" }.toList.sorted.mkString("\n")))
           }
+          case "secret" => {
+            val secrets = collection.mutable.Map[String, ConfigValue]()
+            command.split("\n").map(_.trim).foreach { key => 
+              val value = inputManager match {
+                case Some(im) => Await.result(im.password(key), Duration.Inf)
+                case None => ""
+              }
+              secrets += (key -> ConfigValue(true, value))
+            }
+
+            confCommandLineArgs = confCommandLineArgs ++ secrets
+            ExecuteResult.Success(DisplayData.text(confCommandLineArgs.map { case (key, configValue) => s"${key}: ${if (configValue.secret) "*" * configValue.value.length else configValue.value }" }.toList.sorted.mkString("\n")))
+          }          
           case "conf" => {
             commandArgs.get("master") match {
               case Some(master) => {
@@ -473,7 +513,7 @@ final class ArcInterpreter extends Interpreter {
                 renderHTML(df, numRows, truncate),
                 outputElementHandle
               )
-              length = df.count
+              length += numRows
             }
             Thread.sleep(confStreamingFrequency)
           }
