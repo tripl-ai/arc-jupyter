@@ -73,6 +73,9 @@ object Common {
     |Set variables for this session. E.g. ETL_CONF_BASE_DIR=/home/jovyan/tutorial
     |Supported configuration parameters: numRows, truncate, outputView, persist, streamingDuration
     |
+    |%secret
+    |Set secrets for this session. E.g. ETL_CONF_SECRET
+    |
     |%conf
     |Set global Configuration Parameters which will apply to all cells.
     |
@@ -97,7 +100,7 @@ object Common {
     |java: ${System.getProperty("java.runtime.version")}
     |dynamicConfigurationPlugins: 
     |${arcContext.dynamicConfigurationPlugins.map(c => s" - ${c.getClass.getName}:${c.version}").sorted.mkString("\n")}
-    |pipelinePlugins: [
+    |pipelinePlugins:
     |${arcContext.pipelineStagePlugins.map(c => s" - ${c.getClass.getName}:${c.version}").sorted.mkString("\n")}
     |udfPlugins: 
     |${arcContext.udfPlugins.map(c => s" - ${c.getClass.getName}:${c.version}").sorted.mkString("\n")}
