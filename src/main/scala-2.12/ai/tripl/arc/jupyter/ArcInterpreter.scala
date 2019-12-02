@@ -45,7 +45,7 @@ final class ArcInterpreter extends Interpreter {
 
   implicit var spark: SparkSession = _
 
-  val secretPattern = """"(token|signature|accessKey|secret|secretAccessKey)".*\$\{.*\}""".r
+  val secretPattern = """"(token|signature|accessKey|secret|secretAccessKey)":[\s]*".*"""".r
 
   var confMaster: String = "local[*]"
   var confNumRows = 20
@@ -271,8 +271,8 @@ final class ArcInterpreter extends Interpreter {
           case "arc" => {
             // ensure that the input text does not have secrets
             secretPattern.findFirstIn(command) match {
-              case None => ExecuteResult.Error("Secret found in input. Use %secret to define to prevent accidental leaks.")
-              case Some(_) => {
+              case Some(_) => ExecuteResult.Error("Secret found in input. Use %secret to define to prevent accidental leaks.")
+              case None => {
                 val pipelineEither = ArcPipeline.parseConfig(Left(s"""{"stages": [${command}]}"""), arcContext)
 
                 pipelineEither match {
@@ -540,14 +540,17 @@ final class ArcInterpreter extends Interpreter {
 
     // this code has come from the spark Dataset class:
     val castCols = df.schema.map { field =>
+      // explicitly wrap names to fix any nested select problems
+      val fieldName = s"`${field.name}`"
+
       // Since binary types in top-level schema fields have a specific format to print,
       // so we do not cast them to strings here.
       field.dataType match {
-        case BinaryType => col(field.name)
+        case BinaryType => col(fieldName)
         // replace commas (from format_number), replace any trailing zeros (but leave at least one character after the .)
-        case DoubleType => regexp_replace(regexp_replace(regexp_replace(format_number(col(field.name), 10),",",""),"(?<=.[0-9]{2})0+$",""),"^\\.","0.")
-        case x: DecimalType => regexp_replace(regexp_replace(regexp_replace(format_number(col(field.name), x.scale),",",""),"(?<=.[0-9]{2})0+$",""),"^\\.","0.")
-        case _ => col(field.name).cast(StringType)
+        case DoubleType => regexp_replace(regexp_replace(regexp_replace(format_number(col(fieldName), 10),",",""),"(?<=.[0-9]{2})0+$",""),"^\\.","0.")
+        case x: DecimalType => regexp_replace(regexp_replace(regexp_replace(format_number(col(fieldName), x.scale),",",""),"(?<=.[0-9]{2})0+$",""),"^\\.","0.")
+        case _ => col(fieldName).cast(StringType)
       }
     }
     val data = df.select(castCols: _*).take(numRows)
