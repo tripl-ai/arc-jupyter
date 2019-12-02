@@ -1,5 +1,10 @@
 ## Change Log
 
+# 1.9.1
+
+- add %secret to support safe definition of secrets
+- fix issue with displaying metadata table
+
 # 1.8.1
 
 - update to Arc 2.4.0
