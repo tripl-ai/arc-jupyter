@@ -4,6 +4,7 @@ import java.util.Properties
 import java.util.ServiceLoader
 import scala.collection.JavaConverters._
 import scala.util.Random
+import util.control.Breaks._
 
 import almond.interpreter.{Completion, ExecuteResult, Inspection, Interpreter}
 import almond.interpreter.api.{DisplayData, OutputHandler}
@@ -485,29 +486,44 @@ final class ArcInterpreter extends Interpreter {
             .start
 
           // periodically update results on screen
-          val startTime = System.currentTimeMillis
+          val endTime = System.currentTimeMillis + (streamingDuration * 1000)
           var initial = true
-          var length = 0L
-          while (System.currentTimeMillis <= startTime + (streamingDuration * 1000) && length < numRows) {
-            if (initial) {
-              outputHandler.html("", outputElementHandle)
-              initial = false
-            } else {
-              val df = spark.sql(s"SELECT * FROM ${queryName}")
-              outputHandler.updateHtml(
-                renderHTML(df, numRows, truncate),
-                outputElementHandle
-              )
-              length += numRows
+
+          breakable {
+            while (System.currentTimeMillis <= endTime) {
+
+              val df = spark.table(queryName)
+              df.persist
+
+              val count = df.count
+              // create the html handle on the first run
+              if (initial) {
+                outputHandler.html(
+                  renderHTML(df, numRows, truncate),
+                  outputElementHandle
+                )
+                initial = false
+              } else {
+                outputHandler.updateHtml(
+                  renderHTML(df, numRows, truncate),
+                  outputElementHandle
+                )
+              }
+
+              df.unpersist
+
+              if (count > numRows) {
+                break
+              }
+              Thread.sleep(confStreamingFrequency)
             }
-            Thread.sleep(confStreamingFrequency)
           }
 
           // stop stream and display final result
           writeStream.stop
           outputHandler.html("", outputElementHandle)
           ExecuteResult.Success(
-            DisplayData.html(renderHTML(spark.sql(s"SELECT * FROM ${queryName}"), numRows, truncate))
+            DisplayData.html(renderHTML(spark.table(queryName), numRows, truncate))
           )
         }
         case None => ExecuteResult.Error("No result.")
@@ -534,7 +550,7 @@ final class ArcInterpreter extends Interpreter {
         case BinaryType => col(fieldName)
         // replace commas (from format_number), replace any trailing zeros (but leave at least one character after the .)
         case DoubleType => regexp_replace(regexp_replace(regexp_replace(format_number(col(fieldName), 10),",",""),"(?<=.[0-9]{2})0+$",""),"^\\.","0.")
-        case x: DecimalType => regexp_replace(regexp_replace(regexp_replace(format_number(col(fieldName), x.scale),",",""),"(?<=.[0-9]{2})0+$",""),"^\\.","0.")
+        case x: DecimalType => regexp_replace(format_number(col(fieldName), x.scale),",","")
         case _ => col(fieldName).cast(StringType)
       }
     }
