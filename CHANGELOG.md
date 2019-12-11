@@ -1,5 +1,9 @@
 ## Change Log
 
+# 1.9.2
+
+- fix defect with streaming display
+
 # 1.9.1
 
 - add %secret to support safe definition of secrets
