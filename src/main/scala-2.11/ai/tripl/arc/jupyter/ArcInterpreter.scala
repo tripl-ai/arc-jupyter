@@ -537,10 +537,13 @@ final class ArcInterpreter extends Interpreter {
   def renderHTML(df: DataFrame, numRows: Int, truncate: Int): String = {
     import xml.Utility.escape
 
-    val header = df.schema.fieldNames.toSeq
+    val header = df.columns
+
+    // add index to all the column names so they are unique
+    val renamedDF = df.toDF(df.columns.zipWithIndex.map { case (col, idx) => s"${col}${idx}" }:_*)    
 
     // this code has come from the spark Dataset class:
-    val castCols = df.schema.map { field =>
+    val castCols = renamedDF.schema.map { field =>
       // explicitly wrap names to fix any nested select problems
       val fieldName = s"`${field.name}`"
 
@@ -554,7 +557,7 @@ final class ArcInterpreter extends Interpreter {
         case _ => col(fieldName).cast(StringType)
       }
     }
-    val data = df.select(castCols: _*).take(numRows)
+    val data = renamedDF.select(castCols: _*).take(numRows)
 
     // For array values, replace Seq and Array with square brackets
     // For cells that are beyond `truncate` characters, replace it with the
