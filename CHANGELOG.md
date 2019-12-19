@@ -1,5 +1,9 @@
 ## Change Log
 
+# 1.9.3
+
+- fix defect with data display if multiple columns of same name in same dataframe.
+
 # 1.9.2
 
 - fix defect with streaming display
