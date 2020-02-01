@@ -433,6 +433,7 @@ final class ArcInterpreter extends Interpreter {
             }
             val text = s"""
             |master: ${confMaster}
+            |memory: ${runtimeMemorySize}B
             |numRows: ${confNumRows}
             |truncate: ${confTruncate}
             |streaming: ${confStreaming}
