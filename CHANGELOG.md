@@ -1,5 +1,9 @@
 ## Change Log
 
+# 1.10.0
+
+- update to Arc 2.7.0
+
 # 1.9.3
 
 - fix defect with data display if multiple columns of same name in same dataframe.
