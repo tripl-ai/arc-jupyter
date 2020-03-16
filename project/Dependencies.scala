@@ -2,7 +2,7 @@ import sbt._
 
 object Dependencies {
   // Versions
-  lazy val sparkVersion = "2.4.4"
+  lazy val sparkVersion = "2.4.5"
 
   val sparkCore = "org.apache.spark" %% "spark-core" % sparkVersion 
   val sparkSql = "org.apache.spark" %% "spark-sql" % sparkVersion 
@@ -12,7 +12,7 @@ object Dependencies {
   val kernel = "sh.almond" %% "kernel" % "0.6.0"
   val caseApp = "com.github.alexarchambault" %% "case-app" % "2.0.0-M9"
 
-  val arc = "ai.tripl" %% "arc" % "2.7.0"
+  val arc = "ai.tripl" %% "arc" % "2.8.0"
 
   val graph = "ai.tripl" %% "arc-graph-pipeline-plugin" % "1.0.0"
 

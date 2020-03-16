@@ -1,5 +1,6 @@
 package ai.tripl.arc.jupyter
 
+import java.util.UUID
 import java.util.Properties
 import java.util.ServiceLoader
 import scala.collection.JavaConverters._
@@ -145,7 +146,58 @@ final class ArcInterpreter extends Interpreter {
             ("arc", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
           case x: String if (x.startsWith("%sql")) => {
-            ("sql", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
+            val commandArgs = parseArgs(lines(0))
+            val persist = commandArgs.get("persist") match {
+              case Some(persist) => persist.toBoolean
+              case None => false
+            }
+            val name = commandArgs.get("name") match {
+              case Some(name) => name
+              case None => ""
+            }
+            val description = commandArgs.get("description").map{ description => s""""description": "${description}",""" }.getOrElse("")
+            val outputView = commandArgs.get("outputView") match {
+              case Some(outputView) => outputView
+              case None => randStr(32)
+            }
+            val sqlParams = commandArgs.get("sqlParams") match {
+              case Some(sqlParams) => {
+                parseArgs(sqlParams.replace(",", " ")).map{
+                  case (k, v) => {
+                    if (v.trim().startsWith("${")) {
+                      s""""${k}": ${v}"""
+                    } else {
+                      s""""${k}": "${v}""""
+                    }
+                  }
+                }.mkString(",")
+              }
+              case None => ""
+            }
+
+            ("arc", parseArgs(lines(0)),
+              if (lines(0).startsWith("%sqlvalidate")) {
+                s"""{
+                |  "type": "SQLValidate",
+                |  "name": "${name}",
+                |  ${description}
+                |  "environments": [],
+                |  "sql": \"\"\"${lines.drop(1).mkString("\n")}\"\"\",
+                |  "sqlParams": {${sqlParams}}
+                |}""".stripMargin
+              } else {
+                s"""{
+                |  "type": "SQLTransform",
+                |  "name": "${name}",
+                |  ${description}
+                |  "environments": [],
+                |  "sql": \"\"\"${lines.drop(1).mkString("\n")}\"\"\",
+                |  "outputView": "${outputView}",
+                |  "persist": ${persist},
+                |  "sqlParams": {${sqlParams}}
+                |}""".stripMargin
+              }
+            )
           }
           case x: String if (x.startsWith("%cypher")) => {
             ("cypher", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
@@ -176,12 +228,15 @@ final class ArcInterpreter extends Interpreter {
           }
           case x: String if (x.startsWith("%secret")) => {
             ("secret", parseArgs(lines.mkString(" ")), lines.drop(1).mkString("\n"))
-          }          
+          }
           case x: String if (x.startsWith("%conf")) => {
             ("conf", parseArgs(lines.mkString(" ")), "")
           }
           case x: String if (x.startsWith("%version")) => {
             ("version", parseArgs(lines(0)), "")
+          }
+          case x: String if (x.startsWith("%help")) => {
+            ("help", parseArgs(""), "")
           }
           case _ => ("arc", collection.mutable.Map[String, String](), code.trim)
         }
@@ -224,7 +279,7 @@ final class ArcInterpreter extends Interpreter {
             memoizedDynamicConfigPlugins = Option(ServiceLoader.load(classOf[DynamicConfigurationPlugin], loader).iterator().asScala.toList)
             memoizedDynamicConfigPlugins.get
           }
-        }        
+        }
 
         implicit val arcContext = ARCContext(
           jobId=None,
@@ -254,7 +309,7 @@ final class ArcInterpreter extends Interpreter {
         outputHandler match {
           case Some(outputHandler) => {
             interpreter match {
-              case "arc" | "sql" | "summary" => {
+              case "arc" | "summary" => {
                 val listener = new ProgressSparkListener(listenerElementHandle, jupyterLab)(outputHandler, logger)
                 listener.init()(outputHandler)
                 spark.sparkContext.addSparkListener(listener)
@@ -297,18 +352,9 @@ final class ArcInterpreter extends Interpreter {
                       }
                     }
                   }
-                }                
+                }
               }
             }
-          }
-          case "sql" => {
-            val df = spark.sql(SQLUtils.injectParameters(command, arcContext.commandLineArguments, true))
-            commandArgs.get("outputView") match {
-              case Some(ov) => df.createOrReplaceTempView(ov)
-              case None =>
-            }
-            if (persist) df.persist(StorageLevel.MEMORY_AND_DISK_SER)
-            renderResult(outputHandler, df, numRows, truncate, confStreamingDuration)
           }
           case "cypher" => {
             ExecuteResult.Error("%cypher not supported with Scala 2.11")
@@ -373,7 +419,7 @@ final class ArcInterpreter extends Interpreter {
           }
           case "secret" => {
             val secrets = collection.mutable.Map[String, ConfigValue]()
-            command.split("\n").map(_.trim).foreach { key => 
+            command.split("\n").map(_.trim).foreach { key =>
               val value = inputManager match {
                 case Some(im) => Await.result(im.password(key), Duration.Inf)
                 case None => ""
@@ -383,7 +429,7 @@ final class ArcInterpreter extends Interpreter {
 
             confCommandLineArgs = confCommandLineArgs ++ secrets
             ExecuteResult.Success(DisplayData.text(confCommandLineArgs.map { case (key, configValue) => s"${key}: ${if (configValue.secret) "*" * configValue.value.length else configValue.value }" }.toList.sorted.mkString("\n")))
-          }          
+          }
           case "conf" => {
             commandArgs.get("master") match {
               case Some(master) => {
@@ -541,7 +587,7 @@ final class ArcInterpreter extends Interpreter {
     val header = df.columns
 
     // add index to all the column names so they are unique
-    val renamedDF = df.toDF(df.columns.zipWithIndex.map { case (col, idx) => s"${col}${idx}" }:_*)    
+    val renamedDF = df.toDF(df.columns.zipWithIndex.map { case (col, idx) => s"${col}${idx}" }:_*)
 
     // this code has come from the spark Dataset class:
     val castCols = renamedDF.schema.map { field =>
@@ -585,7 +631,7 @@ final class ArcInterpreter extends Interpreter {
 
   def parseArgs(input: String): collection.mutable.Map[String, String] = {
     val args = collection.mutable.Map[String, String]()
-    val (vals, opts) = input.split(" ").partition {
+    val (vals, opts) = input.split("\\s(?=([^\"']*\"[^\"]*\")*[^\"']*$)").partition {
       _.startsWith("%")
     }
     opts.map { x =>
