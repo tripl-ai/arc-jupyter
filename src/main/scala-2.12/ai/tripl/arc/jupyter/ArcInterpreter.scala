@@ -149,18 +149,13 @@ final class ArcInterpreter extends Interpreter {
           }
           case x: String if (x.startsWith("%sql")) => {
             val commandArgs = parseArgs(lines(0))
-            val persist = commandArgs.get("persist") match {
-              case Some(persist) => persist.toBoolean
-              case None => false
-            }
             val name = commandArgs.get("name") match {
               case Some(name) => name
               case None => ""
             }
-            val description = commandArgs.get("description").map{ description => s""""description": "${description}",""" }.getOrElse("")
-            val outputView = commandArgs.get("outputView") match {
-              case Some(outputView) => outputView
-              case None => randStr(32)
+            val description = commandArgs.get("description") match {
+              case Some(description) => description
+              case None => ""
             }
             val sqlParams = commandArgs.get("sqlParams") match {
               case Some(sqlParams) => {
@@ -175,28 +170,30 @@ final class ArcInterpreter extends Interpreter {
                 }.mkString(",")
               }
               case None => ""
-            }
+            }      
 
             ("arc", parseArgs(lines(0)),
               if (lines(0).startsWith("%sqlvalidate")) {
                 s"""{
                 |  "type": "SQLValidate",
                 |  "name": "${name}",
-                |  ${description}
+                |  "description": "${description}",
                 |  "environments": [],
                 |  "sql": \"\"\"${lines.drop(1).mkString("\n")}\"\"\",
-                |  "sqlParams": {${sqlParams}}
+                |  "sqlParams": {${sqlParams}},
+                |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
                 |}""".stripMargin
               } else {
                 s"""{
                 |  "type": "SQLTransform",
                 |  "name": "${name}",
-                |  ${description}
+                |  "description": "${description}",
                 |  "environments": [],
                 |  "sql": \"\"\"${lines.drop(1).mkString("\n")}\"\"\",
-                |  "outputView": "${outputView}",
-                |  "persist": ${persist},
+                |  "outputView": "${commandArgs.getOrElse("outputView", randStr(32))}",
+                |  "persist": ${commandArgs.getOrElse("persist", "false")},
                 |  "sqlParams": {${sqlParams}}
+                |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "outputView", "persist").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
                 |}""".stripMargin
               }
             )
