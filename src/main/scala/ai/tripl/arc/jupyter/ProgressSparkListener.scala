@@ -102,7 +102,7 @@ final class ProgressSparkListener(executionId: String, isJupyterLab: Boolean)(im
         if (error) {
           outputHandler.updateHtml(
             s"""<div class="progress">
-                |  <div class="progress-bar-danger" style="width: $donePct%;">${statusText}</div>
+                |  <div class="progress-bar-danger" style="width: ${if (!donePct.isNaN) donePct else 100}%;">${statusText}</div>
                 |</div>
                 |""".stripMargin,
             executionId
@@ -110,7 +110,7 @@ final class ProgressSparkListener(executionId: String, isJupyterLab: Boolean)(im
         } else {
           outputHandler.updateHtml(
             s"""<div class="progress">
-                |  <div class="progress-bar-success" style="width: $donePct%;">${statusText}</div>
+                |  <div class="progress-bar-success" style="width: ${if (!donePct.isNaN) donePct else 100}%;">${statusText}</div>
                 |</div>
                 |""".stripMargin,
             executionId
@@ -119,7 +119,7 @@ final class ProgressSparkListener(executionId: String, isJupyterLab: Boolean)(im
       } else {
         outputHandler.updateHtml(
           s"""<div class="progress">
-              |  <div class="progress-bar-info" style="width: $donePct%;">${statusText}</div>
+              |  <div class="progress-bar-info" style="width: ${if (!donePct.isNaN) donePct else 100}%;">${statusText}</div>
               |</div>
               |""".stripMargin,
           executionId
@@ -128,7 +128,7 @@ final class ProgressSparkListener(executionId: String, isJupyterLab: Boolean)(im
     } else {
       outputHandler.updateHtml(
         s"""<div class="progress arc-background">
-            |  <div class="progress-bar arc-complete ${statusClass}" style="width: $donePct%;">${statusText}</div>
+            |  <div class="progress-bar arc-complete ${statusClass}" style="width: ${if (!donePct.isNaN) donePct else 100}%;">${statusText}</div>
             |  <div class="progress-bar arc-running ${statusClass}" style="width: $runningPct%;"></div>
             |</div>
             |""".stripMargin,

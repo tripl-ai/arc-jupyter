@@ -77,7 +77,7 @@ final class ArcInterpreter extends Interpreter {
         "arc",
         "text" // ???
       ),
-      s"""Arc kernel |Java ${sys.props.getOrElse("java.version", "[unknown]")}""".stripMargin
+      s"""Arc kernel Java ${sys.props.getOrElse("java.version", "[unknown]")}""".stripMargin
     )
 
   @volatile private var count = 0
@@ -179,7 +179,7 @@ final class ArcInterpreter extends Interpreter {
                 |  "environments": [],
                 |  "sql": \"\"\"${lines.drop(1).mkString("\n")}\"\"\",
                 |  "sqlParams": {${sqlParams}},
-                |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
+                |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "numRows", "truncate", "persist", "streamingDuration").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
                 |}""".stripMargin
               } else {
                 s"""{
@@ -191,7 +191,7 @@ final class ArcInterpreter extends Interpreter {
                 |  "outputView": "${commandArgs.getOrElse("outputView", randStr(32))}",
                 |  "persist": ${commandArgs.getOrElse("persist", "false")},
                 |  "sqlParams": {${sqlParams}}
-                |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "outputView", "persist").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
+                |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "outputView", "numRows", "truncate", "persist", "streamingDuration").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
                 |}""".stripMargin
               }
             )
@@ -327,9 +327,7 @@ final class ArcInterpreter extends Interpreter {
                 val pipelineEither = ArcPipeline.parseConfig(Left(s"""{"stages": [${command}]}"""), arcContext)
 
                 pipelineEither match {
-                  case Left(errors) => {
-                    ExecuteResult.Error(ai.tripl.arc.config.Error.pipelineSimpleErrorMsg(errors))
-                  }
+                  case Left(errors) => ExecuteResult.Error(ai.tripl.arc.config.Error.pipelineSimpleErrorMsg(errors, false))
                   case Right((pipeline, _)) => {
                     pipeline.stages.length match {
                       case 0 => {
@@ -360,7 +358,7 @@ final class ArcInterpreter extends Interpreter {
             val config = ConfigFactory.parseString(s"""{"plugins": {"config": [${command}]}}""", ConfigParseOptions.defaults().setSyntax(ConfigSyntax.CONF))
             val dynamicConfigsOrErrors = ai.tripl.arc.config.Plugins.resolveConfigPlugins(config, "plugins.config", arcContext.dynamicConfigurationPlugins)(spark, logger, arcContext)
             dynamicConfigsOrErrors match {
-              case Left(errors) => ExecuteResult.Error(ai.tripl.arc.config.Error.pipelineSimpleErrorMsg(errors))
+              case Left(errors) => ExecuteResult.Error(ai.tripl.arc.config.Error.pipelineSimpleErrorMsg(errors, false))
               case Right(dynamicConfigs) => {
                 val dynamicConfigsConf = dynamicConfigs.reduceRight[Config]{ case (c1, c2) => c1.withFallback(c2) }
                 val entryMap = dynamicConfigsConf.entrySet.asScala.map { entry =>
@@ -484,7 +482,12 @@ final class ArcInterpreter extends Interpreter {
         }
       }
 
-      removeListener(spark, executionListener, false)(outputHandler)
+      val error = executeResult match {
+        case _: ExecuteResult.Error => true
+        case _ => false
+      }
+
+      removeListener(spark, executionListener, error)(outputHandler)
       executeResult
     } catch {
       case e: Exception => {
@@ -495,16 +498,12 @@ final class ArcInterpreter extends Interpreter {
   }
 
   def removeListener(spark: SparkSession, listener: Option[ProgressSparkListener], error: Boolean)(implicit outputHandler: Option[OutputHandler]) {
-    listener match {
-      case Some(listener) => {
-        if (error && outputHandler.nonEmpty) {
-          listener.update(true, true)(outputHandler.get)
-        } else {
-          listener.update(false, true)(outputHandler.get)
-        }
+    (listener, outputHandler) match {
+      case (Some(listener), Some(outputHandler)) => {
+        listener.update(error, true)(outputHandler)
         spark.sparkContext.removeSparkListener(listener)
       }
-      case None =>
+      case _ =>
     }
   }
 

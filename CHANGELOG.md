@@ -1,5 +1,9 @@
 # Change Log
 
+## 2.0.1
+
+- update to Arc 2.8.1 to fix some minor defects.
+
 ## 2.0.0
 
 - update to Arc 2.8.0
