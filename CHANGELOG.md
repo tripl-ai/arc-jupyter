@@ -1,5 +1,9 @@
 # Change Log
 
+## 2.0.2
+
+- allow any environment variable starting with `conf_` to set [Spark configuration variables](https://spark.apache.org/docs/latest/configuration.html) e.g. `conf_spark_sql_inMemoryColumnarStorage_compressed` to set `spark.sql.inMemoryColumnarStorage.compressed` (case sensitive).
+
 ## 2.0.1
 
 - update to Arc 2.8.1 to fix some minor defects.

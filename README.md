@@ -21,6 +21,10 @@ docker run \
 triplai/arc-jupyter:[VERSION]
 ```
 
+### Additional Configurations
+
+To set addtional [Spark configuration variables](https://spark.apache.org/docs/latest/configuration.html) create an environemtn environment variable starting with `conf_` and replace the `.` with `_` e.g. `conf_spark_sql_inMemoryColumnarStorage_compressed` to set `spark.sql.inMemoryColumnarStorage.compressed` (case sensitive).
+
 ## Capabilities
 
 | Magic          | Description                                                                                | Scala 2.11 | Scala 2.12 | numRows | truncate | outputView | persist |
