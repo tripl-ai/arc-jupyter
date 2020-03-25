@@ -120,10 +120,10 @@ final class ArcInterpreter extends Interpreter {
 
         // add any spark overrides
         System.getenv.asScala
-          .filter{ case (key, value) => key.startsWith("spark_") }
+          .filter{ case (key, value) => key.startsWith("conf_") }
           .foldLeft(sessionBuilder: SparkSession.Builder){ case (sessionBuilder, (key: String, value: String)) => {
-          sessionBuilder.config(key.replaceAll("_", ".").toLowerCase, value)
-        }}
+            sessionBuilder.config(key.replaceFirst("conf_","").replaceAll("_", "."), value)
+          }}
 
         val session = sessionBuilder.getOrCreate()
         spark = session
