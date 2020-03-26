@@ -1,5 +1,9 @@
 # Change Log
 
+## 2.0.3
+
+- change UI to treat an empty result as a `Success` outcome.
+
 ## 2.0.2
 
 - allow any environment variable starting with `conf_` to set [Spark configuration variables](https://spark.apache.org/docs/latest/configuration.html) e.g. `conf_spark_sql_inMemoryColumnarStorage_compressed` to set `spark.sql.inMemoryColumnarStorage.compressed` (case sensitive).
