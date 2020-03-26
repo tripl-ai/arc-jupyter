@@ -341,7 +341,7 @@ final class ArcInterpreter extends Interpreter {
                             result
                           }
                           case None => {
-                            ExecuteResult.Success("No result.")
+                            ExecuteResult.Success(DisplayData.text("No result."))
                           }
                         }
                       }
