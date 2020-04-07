@@ -1,5 +1,9 @@
 # Change Log
 
+## 2.0.4
+
+- add ability to switch to `monospace` font for output tables.
+
 ## 2.0.3
 
 - change UI to treat an empty result as a `Success` outcome.

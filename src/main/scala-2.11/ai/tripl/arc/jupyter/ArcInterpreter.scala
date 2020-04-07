@@ -5,6 +5,7 @@ import java.util.Properties
 import java.util.ServiceLoader
 import scala.collection.JavaConverters._
 import scala.util.Random
+import scala.util.Try
 import util.control.Breaks._
 
 import almond.interpreter.{Completion, ExecuteResult, Inspection, Interpreter}
@@ -54,6 +55,7 @@ final class ArcInterpreter extends Interpreter {
   var confStreaming = false
   var confStreamingDuration = 10
   var confStreamingFrequency = 1000
+  var confMonospace = false
   var udfsRegistered = false
 
   var isJupyterLab: Option[Boolean] = None
@@ -179,7 +181,7 @@ final class ArcInterpreter extends Interpreter {
                 |  "environments": [],
                 |  "sql": \"\"\"${lines.drop(1).mkString("\n")}\"\"\",
                 |  "sqlParams": {${sqlParams}},
-                |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "numRows", "truncate", "persist", "streamingDuration").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
+                |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "numRows", "truncate", "persist", "monospace", "streamingDuration").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
                 |}""".stripMargin
               } else {
                 s"""{
@@ -191,7 +193,7 @@ final class ArcInterpreter extends Interpreter {
                 |  "outputView": "${commandArgs.getOrElse("outputView", randStr(32))}",
                 |  "persist": ${commandArgs.getOrElse("persist", "false")},
                 |  "sqlParams": {${sqlParams}}
-                |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "outputView", "numRows", "truncate", "persist", "streamingDuration").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
+                |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "outputView", "numRows", "truncate", "persist", "monospace", "streamingDuration").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
                 |}""".stripMargin
               }
             )
@@ -238,22 +240,11 @@ final class ArcInterpreter extends Interpreter {
           case _ => ("arc", collection.mutable.Map[String, String](), code.trim)
         }
 
-        val numRows = commandArgs.get("numRows") match {
-          case Some(numRows) => numRows.toInt
-          case None => confNumRows
-        }
-        val truncate = commandArgs.get("truncate") match {
-          case Some(truncate) => truncate.toInt
-          case None => confTruncate
-        }
-        val streamingDuration = commandArgs.get("streamingDuration") match {
-          case Some(streamingDuration) => streamingDuration.toInt
-          case None => confStreamingDuration
-        }
-        val persist = commandArgs.get("persist") match {
-          case Some(persist) => persist.toBoolean
-          case None => false
-        }
+        val numRows = Try(commandArgs.get("numRows").get.toInt).getOrElse(confNumRows)
+        val truncate = Try(commandArgs.get("truncate").get.toInt).getOrElse(confTruncate)
+        val streamingDuration = Try(commandArgs.get("streamingDuration").get.toInt).getOrElse(confStreamingDuration)
+        val persist = Try(commandArgs.get("persist").get.toBoolean).getOrElse(false)
+        val monospace = Try(commandArgs.get("monospace").get.toBoolean).getOrElse(confMonospace)
 
         // store previous values so that the ServiceLoader resolution is not called each run
         val pipelineStagePlugins = memoizedPipelineStagePlugins match {
@@ -446,6 +437,17 @@ final class ArcInterpreter extends Interpreter {
               }
               case None =>
             }
+            commandArgs.get("monospace") match {
+              case Some(monospace) => {
+                try {
+                  val monospaceValue = monospace.toBoolean
+                  confMonospace = monospaceValue
+                } catch {
+                  case e: Exception =>
+                }
+              }
+              case None =>
+            }             
             commandArgs.get("streamingDuration") match {
               case Some(streamingDuration) => {
                 try {
@@ -460,6 +462,7 @@ final class ArcInterpreter extends Interpreter {
             val text = s"""
             |master: ${confMaster}
             |memory: ${runtimeMemorySize}B
+            |monospace: ${confMonospace}
             |numRows: ${confNumRows}
             |truncate: ${confTruncate}
             |streaming: ${confStreaming}

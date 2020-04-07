@@ -88,6 +88,7 @@ object Common {
     |truncate:          The maximum number of characters displayed in a string result (integer)
     |streaming:         Set the notebook into streaming mode (boolean)
     |streamingDuration: How many seconds to execute a streaming stage before stopping (will stop if numRows is reached first).
+    |monospace:         Use a fixed-width font.
     """.stripMargin
   }
 
