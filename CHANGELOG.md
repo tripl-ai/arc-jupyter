@@ -1,5 +1,10 @@
 # Change Log
 
+## 2.1.0
+
+- add ability to switch to `monospace` font for output tables.
+- update to Arc 2.9.0.
+
 ## 2.0.3
 
 - change UI to treat an empty result as a `Success` outcome.

@@ -42,15 +42,15 @@ object Common {
     |Commands:
     |%arc
     |Run the stage as an Arc stage. Useful if you want to override the config settings for an individual cell.
-    |Supported configuration parameters: numRows, truncate, streamingDuration
+    |Supported configuration parameters: numRows, truncate, monospace, streamingDuration
     |
     |%sql
     |Run a SQL query. 
-    |Supported configuration parameters: numRows, truncate, outputView, persist, streamingDuration
+    |Supported configuration parameters: numRows, truncate, outputView, persist, monospace, streamingDuration
     |
     |%cypher
     |Run a Cypher graph query. Scala 2.12 only.
-    |Supported configuration parameters: numRows, truncate, outputView, persist
+    |Supported configuration parameters: numRows, truncate, outputView, persist, monospace
     |    
     |%schema [view]
     |Display a JSON formatted schema for the input view
@@ -60,18 +60,18 @@ object Common {
     |
     |%metadata [view]
     |Create an Arc metadata dataset for the input view
-    |Supported configuration parameters: numRows, truncate, outputView, persist
+    |Supported configuration parameters: numRows, truncate, outputView, persist, monospace
     |
     |%printmetadata [view]
     |Display a JSON formatted Arc metadata schema for the input view
     |
     |%summary [view]
     |Create an Summary statistics dataset for the input view
-    |Supported configuration parameters: numRows, truncate, outputView, persist
+    |Supported configuration parameters: numRows, truncate, outputView, persist, monospace
     |
     |%env
     |Set variables for this session. E.g. ETL_CONF_BASE_DIR=/home/jovyan/tutorial
-    |Supported configuration parameters: numRows, truncate, outputView, persist, streamingDuration
+    |Supported configuration parameters: numRows, truncate, outputView, persist, monospace, streamingDuration
     |
     |%secret
     |Set secrets for this session. E.g. ETL_CONF_SECRET
