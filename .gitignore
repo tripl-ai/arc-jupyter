@@ -6,6 +6,7 @@
 .cache
 spark-warehouse
 .metals/
+metals.sbt
 .bloop/
 .ivy2/
 local/
