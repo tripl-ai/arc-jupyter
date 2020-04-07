@@ -1,8 +1,9 @@
 # Change Log
 
-## 2.0.4
+## 2.1.1
 
 - add ability to switch to `monospace` font for output tables.
+- update to Arc 2.9.0.
 
 ## 2.0.3
 
