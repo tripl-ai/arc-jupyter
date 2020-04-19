@@ -1,8 +1,13 @@
 # Change Log
 
+## 2.2.0
+
+- add ability to switch add `text-align: left` for output tables via `leftAlign` `%conf`.
+- update to Arc 2.10.0
+
 ## 2.1.1
 
-- add ability to switch to `monospace` font for output tables.
+- add ability to switch to `monospace` font for output tables via `monospace` `%conf`.
 - update to Arc 2.9.0.
 
 ## 2.0.3
