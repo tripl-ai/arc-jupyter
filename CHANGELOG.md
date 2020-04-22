@@ -1,5 +1,9 @@
 # Change Log
 
+## 2.3.0
+
+- force `spark.authentication` encryption for `io` (any temporary files) via `spark.io.encryption.enable` and `network` (any network traffic) via `spark.network.crypto.enabled` using a randomly generated key each notebook session.
+
 ## 2.2.0
 
 - add ability to switch add `text-align: left` for output tables via `leftAlign` `%conf`.
