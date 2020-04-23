@@ -138,13 +138,19 @@ final class ArcInterpreter extends Interpreter {
         val session = sessionBuilder.getOrCreate()
         spark = session
 
-        implicit val logger = LoggerFactory.getLogger("")
         val loader = ai.tripl.arc.util.Utils.getContextOrSparkClassLoader
 
+        implicit val logger = LoggerFactory.getLogger("arc-jupyter")
         val sparkConf = new java.util.HashMap[String, String]()
-        spark.sparkContext.getConf.getAll.foreach{ case (k, v) => sparkConf.put(k, v) }
+        spark.sparkContext.getConf.getAll.filter{ case (k, _) => !Seq("spark.authenticate.secret").contains(k) }.foreach{ case (k, v) => sparkConf.put(k, v) }
         logger.info()
           .field("config", sparkConf)
+          .field("sparkVersion", spark.version)
+          .field("arcVersion", ai.tripl.arc.util.Utils.getFrameworkVersion)
+          .field("hadoopVersion", org.apache.hadoop.util.VersionInfo.getVersion)
+          .field("scalaVersion", scala.util.Properties.versionNumberString)
+          .field("javaVersion", System.getProperty("java.runtime.version"))          
+          .log()
 
         import session.implicits._
 
@@ -301,7 +307,7 @@ final class ArcInterpreter extends Interpreter {
           activeLifecyclePlugins=Nil,
           pipelineStagePlugins=pipelineStagePlugins,
           udfPlugins=udfPlugins,
-          serializableConfiguration=Option(new SerializableConfiguration(spark.sparkContext.hadoopConfiguration)),
+          serializableConfiguration=new SerializableConfiguration(spark.sparkContext.hadoopConfiguration),
           userData=memoizedUserData
         )
 
