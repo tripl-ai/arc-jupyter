@@ -3,8 +3,8 @@ package ai.tripl.arc.jupyter
 import java.util.UUID
 import java.util.Properties
 import java.util.ServiceLoader
+import java.security.SecureRandom
 import scala.collection.JavaConverters._
-import scala.util.Random
 import scala.util.Try
 import util.control.Breaks._
 
@@ -36,6 +36,7 @@ import ai.tripl.arc.plugins._
 import ai.tripl.arc.util.MetadataUtils
 import ai.tripl.arc.util.SQLUtils
 import ai.tripl.arc.util.log.LoggerFactory
+import ai.tripl.arc.util.SerializableConfiguration
 
 import java.lang.management.ManagementFactory
 
@@ -47,6 +48,10 @@ case class ConfigValue (
 final class ArcInterpreter extends Interpreter {
 
   implicit var spark: SparkSession = _
+
+  val secureRandom = new SecureRandom()
+  val randomBytes = new Array[Byte](64)
+  secureRandom.nextBytes(randomBytes)  
 
   val secretPattern = """"(token|signature|accessKey|secret|secretAccessKey)":[\s]*".*"""".r
 
@@ -89,7 +94,7 @@ final class ArcInterpreter extends Interpreter {
 
   val alpha = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
   val size = alpha.size
-  def randStr(n:Int) = (1 to n).map(x => alpha(Random.nextInt.abs % size)).mkString
+  def randStr(n:Int) = (1 to n).map(x => alpha(secureRandom.nextInt.abs % size)).mkString
 
   def execute(
     code: String,
@@ -112,6 +117,8 @@ final class ArcInterpreter extends Interpreter {
         return ExecuteResult.Error(s"Cannot execute as requested JVM memory (-Xmx${runtimeMemorySize}B) exceeds available Docker memory (${physicalMemorySize}B) limit.\nEither decrease the requested JVM memory or increase the Docker memory limit.")
       } else {
 
+
+
         val sessionBuilder = SparkSession
           .builder()
           .master(confMaster)
@@ -119,11 +126,17 @@ final class ArcInterpreter extends Interpreter {
           .config("spark.sql.warehouse.dir", "/tmp/spark-warehouse")
           .config("spark.rdd.compress", true)
           .config("spark.sql.cbo.enabled", true)
+          .config("spark.authenticate", true)
+          .config("spark.authenticate.secret", new String(java.util.Base64.getEncoder.encode(randomBytes)))
+          .config("spark.io.encryption.enable", true)
+          .config("spark.network.crypto.enabled", true)
           .config("spark.driver.maxResultSize", s"${(runtimeMemorySize * 0.8).toLong}b")
 
         // add any spark overrides
         System.getenv.asScala
-          .filter{ case (key, value) => key.startsWith("conf_") }
+          .filter{ case (key, _) => key.startsWith("conf_") }
+          // you cannot override these settings for security
+          .filter{ case (key, _) => !Seq("conf_spark_authenticate", "conf_spark_authenticate_secret", "conf_spark_io_encryption_enable", "conf_spark_network_crypto_enabled").contains(key) }
           .foldLeft(sessionBuilder: SparkSession.Builder){ case (sessionBuilder, (key: String, value: String)) => {
             sessionBuilder.config(key.replaceFirst("conf_","").replaceAll("_", "."), value)
           }}
@@ -131,8 +144,19 @@ final class ArcInterpreter extends Interpreter {
         val session = sessionBuilder.getOrCreate()
         spark = session
 
-        implicit val logger = LoggerFactory.getLogger("")
         val loader = ai.tripl.arc.util.Utils.getContextOrSparkClassLoader
+
+        implicit val logger = LoggerFactory.getLogger("arc-jupyter")
+        val sparkConf = new java.util.HashMap[String, String]()
+        spark.sparkContext.getConf.getAll.filter{ case (k, _) => !Seq("spark.authenticate.secret").contains(k) }.foreach{ case (k, v) => sparkConf.put(k, v) }
+        logger.info()
+          .field("config", sparkConf)
+          .field("sparkVersion", spark.version)
+          .field("arcVersion", ai.tripl.arc.util.Utils.getFrameworkVersion)
+          .field("hadoopVersion", org.apache.hadoop.util.VersionInfo.getVersion)
+          .field("scalaVersion", scala.util.Properties.versionNumberString)
+          .field("javaVersion", System.getProperty("java.runtime.version"))          
+          .log()
 
         import session.implicits._
 
@@ -289,6 +313,7 @@ final class ArcInterpreter extends Interpreter {
           activeLifecyclePlugins=Nil,
           pipelineStagePlugins=pipelineStagePlugins,
           udfPlugins=udfPlugins,
+          serializableConfiguration=new SerializableConfiguration(spark.sparkContext.hadoopConfiguration),
           userData=memoizedUserData
         )
 
