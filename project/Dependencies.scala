@@ -12,9 +12,9 @@ object Dependencies {
   val kernel = "sh.almond" %% "kernel" % "0.6.0"
   val caseApp = "com.github.alexarchambault" %% "case-app" % "2.0.0-M9"
 
-  val arc = "ai.tripl" %% "arc" % "2.10.0" % "provided"
+  val arc = "ai.tripl" %% "arc" % "2.10.1" % "provided"
 
-  val graph = "ai.tripl" %% "arc-graph-pipeline-plugin" % "1.1.0" % "provided"
+  val graph = "ai.tripl" %% "arc-graph-pipeline-plugin" % "1.2.0" % "provided"
 
   val etlDeps211 = Seq(
     sparkCore,
