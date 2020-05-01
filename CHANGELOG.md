@@ -1,5 +1,10 @@
 # Change Log
 
+## 2.3.1
+
+- only log configurations on first run after kernel start.
+- prevent `math_jax` from trying to render forumulas from Arc outputs.
+
 ## 2.3.0
 
 - force `spark.authentication` encryption for `io` (any temporary files) via `spark.io.encryption.enable` and `network` (any network traffic) via `spark.network.crypto.enabled` using a randomly generated key each notebook session.

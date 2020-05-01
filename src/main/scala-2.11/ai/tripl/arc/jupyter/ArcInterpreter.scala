@@ -49,7 +49,7 @@ final class ArcInterpreter extends Interpreter {
 
   val secureRandom = new SecureRandom()
   val randomBytes = new Array[Byte](64)
-  secureRandom.nextBytes(randomBytes)  
+  secureRandom.nextBytes(randomBytes)
   val secretPattern = """"(token|signature|accessKey|secret|secretAccessKey)":[\s]*".*"""".r
 
   var confMaster: String = "local[*]"
@@ -113,6 +113,7 @@ final class ArcInterpreter extends Interpreter {
       val executeResult = if (runtimeMemorySize > physicalMemorySize) {
         return ExecuteResult.Error(s"Cannot execute as requested JVM memory (-Xmx${runtimeMemorySize}B) exceeds available Docker memory (${physicalMemorySize}B) limit.\nEither decrease the requested JVM memory or increase the Docker memory limit.")
       } else {
+        val firstRun = SparkSession.getActiveSession.isEmpty
 
         val sessionBuilder = SparkSession
           .builder()
@@ -123,7 +124,7 @@ final class ArcInterpreter extends Interpreter {
           .config("spark.authenticate", true)
           .config("spark.authenticate.secret", new String(java.util.Base64.getEncoder.encode(randomBytes)))
           .config("spark.io.encryption.enable", true)
-          .config("spark.network.crypto.enabled", true)          
+          .config("spark.network.crypto.enabled", true)
           .config("spark.driver.maxResultSize", s"${(runtimeMemorySize * 0.8).toLong}b")
 
         // add any spark overrides
@@ -141,16 +142,19 @@ final class ArcInterpreter extends Interpreter {
         val loader = ai.tripl.arc.util.Utils.getContextOrSparkClassLoader
 
         implicit val logger = LoggerFactory.getLogger("arc-jupyter")
-        val sparkConf = new java.util.HashMap[String, String]()
-        spark.sparkContext.getConf.getAll.filter{ case (k, _) => !Seq("spark.authenticate.secret").contains(k) }.foreach{ case (k, v) => sparkConf.put(k, v) }
-        logger.info()
-          .field("config", sparkConf)
-          .field("sparkVersion", spark.version)
-          .field("arcVersion", ai.tripl.arc.util.Utils.getFrameworkVersion)
-          .field("hadoopVersion", org.apache.hadoop.util.VersionInfo.getVersion)
-          .field("scalaVersion", scala.util.Properties.versionNumberString)
-          .field("javaVersion", System.getProperty("java.runtime.version"))          
-          .log()
+
+        if (firstRun) {
+          val sparkConf = new java.util.HashMap[String, String]()
+          spark.sparkContext.getConf.getAll.filter{ case (k, _) => !Seq("spark.authenticate.secret").contains(k) }.foreach{ case (k, v) => sparkConf.put(k, v) }
+          logger.info()
+            .field("config", sparkConf)
+            .field("sparkVersion", spark.version)
+            .field("arcVersion", ai.tripl.arc.util.Utils.getFrameworkVersion)
+            .field("hadoopVersion", org.apache.hadoop.util.VersionInfo.getVersion)
+            .field("scalaVersion", scala.util.Properties.versionNumberString)
+            .field("javaVersion", System.getProperty("java.runtime.version"))
+            .log()
+        }
 
         import session.implicits._
 
@@ -664,7 +668,7 @@ final class ArcInterpreter extends Interpreter {
     val monospaceClass = if (monospace) "monospace" else ""
     val leftAlignClass = if (leftAlign) "leftalign" else ""
 
-    s"""<table class="${monospaceClass} ${leftAlignClass}"><tr>${header.map(h => s"<th>${escape(h)}</th>").mkString}</tr>${rows.map { row => s"<tr>${row.map { cell => s"<td>${escape(cell)}</td>" }.mkString}</tr>"}.mkString}</table>"""
+    s"""<table tex2jax_ignore class="${monospaceClass} ${leftAlignClass}"><tr>${header.map(h => s"<th>${escape(h)}</th>").mkString}</tr>${rows.map { row => s"<tr>${row.map { cell => s"<td>${escape(cell)}</td>" }.mkString}</tr>"}.mkString}</table>"""
   }
 
   def parseArgs(input: String): collection.mutable.Map[String, String] = {
