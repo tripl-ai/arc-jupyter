@@ -13,10 +13,7 @@ import almond.interpreter.api.{DisplayData, OutputHandler}
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
 import almond.interpreter.input.InputManager
-import almond.protocol.internal.ExtraCodecs._
 import almond.protocol.KernelInfo
-import argonaut._
-import argonaut.Argonaut._
 
 import org.apache.commons.lang3.time.DurationFormatUtils
 import org.apache.spark.sql._
@@ -26,6 +23,8 @@ import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
 
 import com.typesafe.config._
+
+import org.opencypher.morpheus.api.MorpheusSession
 
 import ai.tripl.arc.ARC
 import ai.tripl.arc.api.API.ARCContext
@@ -373,7 +372,20 @@ final class ArcInterpreter extends Interpreter {
             }
           }
           case "cypher" => {
-            ExecuteResult.Error("%cypher not supported with Scala 2.11")
+            // the morpheus session must be created by the GraphTransform stage
+            val morpheusSession = arcContext.userData.get("morpheusSession") match {
+              case Some(morpheusSession: MorpheusSession) => morpheusSession
+              case _ => throw new Exception(s"CypherTransform executes an existing graph created with GraphTransform but no session exists to execute CypherTransform against.")
+            }
+            val df = morpheusSession.cypher(SQLUtils.injectParameters(command, confCommandLineArgs.map { case (key, config) => (key, config.value) }, true)).records.table.df
+            commandArgs.get("outputView") match {
+              case Some(ov) => df.createOrReplaceTempView(ov)
+              case None =>
+            }
+            if (persist) df.persist(StorageLevel.MEMORY_AND_DISK_SER)
+            ExecuteResult.Success(
+              DisplayData.html(renderHTML(df, numRows, truncate, monospace, leftAlign))
+            )
           }
           case "configplugin" => {
             val config = ConfigFactory.parseString(s"""{"plugins": {"config": [${command}]}}""", ConfigParseOptions.defaults().setSyntax(ConfigSyntax.CONF))
