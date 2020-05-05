@@ -12,13 +12,7 @@ lazy val root = (project in file(".")).
     organizationHomepage := Some(url("https://arc.tripl.ai")),
     crossScalaVersions := supportedScalaVersions,
     licenses := List("MIT" -> new URL("https://opensource.org/licenses/MIT")),
-    libraryDependencies ++= {
-      scalaBinaryVersion.value match {
-        case "2.12" => etlDeps212
-        case _ =>
-          sys.error("Only Scala 2.11 and 2.12 are supported")
-      }
-    },
+    libraryDependencies ++= etlDeps,
     parallelExecution in Test := false,
     parallelExecution in IntegrationTest := false,
     buildInfoKeys := Seq[BuildInfoKey](version, scalaVersion),
