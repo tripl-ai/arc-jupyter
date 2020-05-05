@@ -1,8 +1,7 @@
 import Dependencies._
 
-lazy val scala211 = "2.11.12"
 lazy val scala212 = "2.12.10"
-lazy val supportedScalaVersions = List(scala211, scala212)
+lazy val supportedScalaVersions = List(scala212)
 
 lazy val root = (project in file(".")).
   enablePlugins(BuildInfoPlugin).
@@ -15,7 +14,6 @@ lazy val root = (project in file(".")).
     licenses := List("MIT" -> new URL("https://opensource.org/licenses/MIT")),
     libraryDependencies ++= {
       scalaBinaryVersion.value match {
-        case "2.11" => etlDeps211
         case "2.12" => etlDeps212
         case _ =>
           sys.error("Only Scala 2.11 and 2.12 are supported")
@@ -35,6 +33,8 @@ lazy val root = (project in file(".")).
 
 resolvers += Resolver.mavenLocal
 publishM2Configuration := publishM2Configuration.value.withOverwrite(true)
+
+resolvers += "Spark Staging" at "https://repository.apache.org/content/repositories/orgapachespark-1341/"
 
 fork in run := true  
 

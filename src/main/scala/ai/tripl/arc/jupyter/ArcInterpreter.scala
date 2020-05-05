@@ -19,7 +19,6 @@ import almond.interpreter.api.{DisplayData, OutputHandler}
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
 import almond.interpreter.input.InputManager
-import almond.protocol.internal.ExtraCodecs._
 import almond.protocol.KernelInfo
 
 import org.apache.commons.io.FileUtils
