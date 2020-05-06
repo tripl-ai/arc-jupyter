@@ -1,5 +1,9 @@
 # Change Log
 
+## 2.3.2
+
+- allow environment variables directly in `%sql` and `%sqlvalidate` magics to speed development.
+
 ## 2.3.1
 
 - only log configurations on first run after kernel start.

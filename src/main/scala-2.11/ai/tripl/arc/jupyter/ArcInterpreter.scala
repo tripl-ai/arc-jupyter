@@ -50,6 +50,7 @@ final class ArcInterpreter extends Interpreter {
   val secureRandom = new SecureRandom()
   val randomBytes = new Array[Byte](64)
   secureRandom.nextBytes(randomBytes)
+
   val secretPattern = """"(token|signature|accessKey|secret|secretAccessKey)":[\s]*".*"""".r
 
   var confMaster: String = "local[*]"
@@ -113,12 +114,14 @@ final class ArcInterpreter extends Interpreter {
       val executeResult = if (runtimeMemorySize > physicalMemorySize) {
         return ExecuteResult.Error(s"Cannot execute as requested JVM memory (-Xmx${runtimeMemorySize}B) exceeds available Docker memory (${physicalMemorySize}B) limit.\nEither decrease the requested JVM memory or increase the Docker memory limit.")
       } else {
+
         val firstRun = SparkSession.getActiveSession.isEmpty
 
         val sessionBuilder = SparkSession
           .builder()
           .master(confMaster)
           .appName("arc-jupyter")
+          .config("spark.sql.warehouse.dir", "/tmp/spark-warehouse")
           .config("spark.rdd.compress", true)
           .config("spark.sql.cbo.enabled", true)
           .config("spark.authenticate", true)
@@ -129,7 +132,7 @@ final class ArcInterpreter extends Interpreter {
 
         // add any spark overrides
         System.getenv.asScala
-          .filter{ case (key, value) => key.startsWith("conf_") }
+          .filter{ case (key, _) => key.startsWith("conf_") }
           // you cannot override these settings for security
           .filter{ case (key, _) => !Seq("conf_spark_authenticate", "conf_spark_authenticate_secret", "conf_spark_io_encryption_enable", "conf_spark_network_crypto_enabled").contains(key) }
           .foldLeft(sessionBuilder: SparkSession.Builder){ case (sessionBuilder, (key: String, value: String)) => {
@@ -204,7 +207,7 @@ final class ArcInterpreter extends Interpreter {
                 |  "name": "${name}",
                 |  "description": "${description}",
                 |  "environments": [],
-                |  "sql": \"\"\"${lines.drop(1).mkString("\n")}\"\"\",
+                |  "sql": \"\"\"${SQLUtils.injectParameters(lines.drop(1).mkString("\n"), confCommandLineArgs.map { case (key, config) => (key, config.value) }, true)}\"\"\",
                 |  "sqlParams": {${sqlParams}},
                 |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "numRows", "truncate", "persist", "monospace", "leftAlign", "streamingDuration").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
                 |}""".stripMargin
@@ -214,7 +217,7 @@ final class ArcInterpreter extends Interpreter {
                 |  "name": "${name}",
                 |  "description": "${description}",
                 |  "environments": [],
-                |  "sql": \"\"\"${lines.drop(1).mkString("\n")}\"\"\",
+                |  "sql": \"\"\"${SQLUtils.injectParameters(lines.drop(1).mkString("\n"), confCommandLineArgs.map { case (key, config) => (key, config.value) }, true)}\"\"\",
                 |  "outputView": "${commandArgs.getOrElse("outputView", randStr(32))}",
                 |  "persist": ${commandArgs.getOrElse("persist", "false")},
                 |  "sqlParams": {${sqlParams}}
@@ -668,7 +671,7 @@ final class ArcInterpreter extends Interpreter {
     val monospaceClass = if (monospace) "monospace" else ""
     val leftAlignClass = if (leftAlign) "leftalign" else ""
 
-    s"""<table tex2jax_ignore class="${monospaceClass} ${leftAlignClass}"><tr>${header.map(h => s"<th>${escape(h)}</th>").mkString}</tr>${rows.map { row => s"<tr>${row.map { cell => s"<td>${escape(cell)}</td>" }.mkString}</tr>"}.mkString}</table>"""
+    s"""<table class="tex2jax_ignore ${monospaceClass} ${leftAlignClass}"><tr>${header.map(h => s"<th>${escape(h)}</th>").mkString}</tr>${rows.map { row => s"<tr>${row.map { cell => s"<td>${escape(cell)}</td>" }.mkString}</tr>"}.mkString}</table>"""
   }
 
   def parseArgs(input: String): collection.mutable.Map[String, String] = {

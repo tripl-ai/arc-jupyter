@@ -209,7 +209,7 @@ final class ArcInterpreter extends Interpreter {
                 |  "name": "${name}",
                 |  "description": "${description}",
                 |  "environments": [],
-                |  "sql": \"\"\"${lines.drop(1).mkString("\n")}\"\"\",
+                |  "sql": \"\"\"${SQLUtils.injectParameters(lines.drop(1).mkString("\n"), confCommandLineArgs.map { case (key, config) => (key, config.value) }, true)}\"\"\",
                 |  "sqlParams": {${sqlParams}},
                 |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "numRows", "truncate", "persist", "monospace", "leftAlign", "streamingDuration").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
                 |}""".stripMargin
@@ -219,7 +219,7 @@ final class ArcInterpreter extends Interpreter {
                 |  "name": "${name}",
                 |  "description": "${description}",
                 |  "environments": [],
-                |  "sql": \"\"\"${lines.drop(1).mkString("\n")}\"\"\",
+                |  "sql": \"\"\"${SQLUtils.injectParameters(lines.drop(1).mkString("\n"), confCommandLineArgs.map { case (key, config) => (key, config.value) }, true)}\"\"\",
                 |  "outputView": "${commandArgs.getOrElse("outputView", randStr(32))}",
                 |  "persist": ${commandArgs.getOrElse("persist", "false")},
                 |  "sqlParams": {${sqlParams}}
@@ -380,7 +380,7 @@ final class ArcInterpreter extends Interpreter {
               case Some(morpheusSession: MorpheusSession) => morpheusSession
               case _ => throw new Exception(s"CypherTransform executes an existing graph created with GraphTransform but no session exists to execute CypherTransform against.")
             }
-            val df = morpheusSession.cypher(SQLUtils.injectParameters(command, arcContext.commandLineArguments, true)).records.table.df
+            val df = morpheusSession.cypher(SQLUtils.injectParameters(command, confCommandLineArgs.map { case (key, config) => (key, config.value) }, true)).records.table.df
             commandArgs.get("outputView") match {
               case Some(ov) => df.createOrReplaceTempView(ov)
               case None =>
