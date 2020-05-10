@@ -157,6 +157,11 @@ final class ArcInterpreter extends Interpreter {
             .field("scalaVersion", scala.util.Properties.versionNumberString)
             .field("javaVersion", System.getProperty("java.runtime.version"))
             .log()
+
+          // only set default aws provider override if not provided
+          if (Option(spark.sparkContext.hadoopConfiguration.get("fs.s3a.aws.credentials.provider")).isEmpty) {
+            spark.sparkContext.hadoopConfiguration.set("fs.s3a.aws.credentials.provider", ai.tripl.arc.util.CloudUtils.defaultAWSProvidersOverride)
+          }
         }
 
         import session.implicits._
@@ -185,21 +190,12 @@ final class ArcInterpreter extends Interpreter {
               case Some(description) => description
               case None => ""
             }
+            val envParams = confCommandLineArgs.map { case (key, config) => (key, config.value) }
             val sqlParams = commandArgs.get("sqlParams") match {
-              case Some(sqlParams) => {
-                parseArgs(sqlParams.replace(",", " ")).map{
-                  case (k, v) => {
-                    if (v.trim().startsWith("${")) {
-                      s""""${k}": ${v}"""
-                    } else {
-                      s""""${k}": "${v}""""
-                    }
-                  }
-                }.mkString(",")
-              }
-              case None => ""
+              case Some(sqlParams) => parseArgs(Common.injectParameters(sqlParams.replace(",", " "), envParams))
+              case None => Map[String, String]()
             }
-
+            val params = envParams ++ sqlParams
             ("arc", parseArgs(lines(0)),
               if (lines(0).startsWith("%sqlvalidate")) {
                 s"""{
@@ -207,8 +203,7 @@ final class ArcInterpreter extends Interpreter {
                 |  "name": "${name}",
                 |  "description": "${description}",
                 |  "environments": [],
-                |  "sql": \"\"\"${SQLUtils.injectParameters(lines.drop(1).mkString("\n"), confCommandLineArgs.map { case (key, config) => (key, config.value) }, true)}\"\"\",
-                |  "sqlParams": {${sqlParams}},
+                |  "sql": \"\"\"${SQLUtils.injectParameters(lines.drop(1).mkString("\n"), params, true )}\"\"\",
                 |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "numRows", "truncate", "persist", "monospace", "leftAlign", "streamingDuration").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
                 |}""".stripMargin
               } else {
@@ -217,10 +212,9 @@ final class ArcInterpreter extends Interpreter {
                 |  "name": "${name}",
                 |  "description": "${description}",
                 |  "environments": [],
-                |  "sql": \"\"\"${SQLUtils.injectParameters(lines.drop(1).mkString("\n"), confCommandLineArgs.map { case (key, config) => (key, config.value) }, true)}\"\"\",
+                |  "sql": \"\"\"${SQLUtils.injectParameters(lines.drop(1).mkString("\n"), params, true )}\"\"\",
                 |  "outputView": "${commandArgs.getOrElse("outputView", randStr(32))}",
                 |  "persist": ${commandArgs.getOrElse("persist", "false")},
-                |  "sqlParams": {${sqlParams}}
                 |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "outputView", "numRows", "truncate", "persist", "monospace", "leftAlign", "streamingDuration").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
                 |}""".stripMargin
               }

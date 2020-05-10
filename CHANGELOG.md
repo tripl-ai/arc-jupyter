@@ -1,5 +1,10 @@
 # Change Log
 
+## 2.3.3
+
+- **FIX** restore the ability for user to be able to define `fs.s3a.aws.credentials.provider` overrides via `--conf spark.hadoop.fs.s3a.aws.credentials.provider=`
+- modify environment variable behavior to make them easier to use for `%sql` and `%sqlvalidate` magics.
+
 ## 2.3.2
 
 - allow environment variables directly in `%sql` and `%sqlvalidate` magics to speed development.
