@@ -107,4 +107,15 @@ object Common {
     |${arcContext.udfPlugins.map(c => s" - ${c.getClass.getName}:${c.version}").sorted.mkString("\n")}
     """.stripMargin
   }
+
+  def injectParameters(sql: String, params: Map[String, String])(implicit logger: ai.tripl.arc.util.log.logger.Logger): String = {
+    // replace sqlParams parameters
+    var stmt = params.foldLeft(sql) {
+      case (stmt, (k,v)) => {
+        val matchPlaceholderRegex = "[$][{]\\s*" + k + "\\s*(?:=[^}]+)?[}]"
+        matchPlaceholderRegex.r.replaceAllIn(stmt, v)
+      }
+    }
+    stmt
+  }  
 }
