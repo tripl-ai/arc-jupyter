@@ -133,6 +133,8 @@ final class ArcInterpreter extends Interpreter {
         // add any spark overrides
         System.getenv.asScala
           .filter{ case (key, _) => key.startsWith("conf_") }
+          // apply hadoop options after spark session creation
+          .filter{ case (key, _) => !key.startsWith("conf_spark_hadoop") }          
           // you cannot override these settings for security
           .filter{ case (key, _) => !Seq("conf_spark_authenticate", "conf_spark_authenticate_secret", "conf_spark_io_encryption_enable", "conf_spark_network_crypto_enabled").contains(key) }
           .foldLeft(sessionBuilder: SparkSession.Builder){ case (sessionBuilder, (key: String, value: String)) => {
@@ -141,6 +143,13 @@ final class ArcInterpreter extends Interpreter {
 
         val session = sessionBuilder.getOrCreate()
         spark = session
+
+        // add any hadoop overrides
+        System.getenv.asScala
+          .filter{ case (key, _) => key.startsWith("conf_spark_hadoop") }
+          .foreach{ case (key: String, value: String) => {
+            spark.sparkContext.hadoopConfiguration.set(key.replaceFirst("conf_spark_hadoop","").replaceAll("_", "."), value)
+          }}        
 
         val loader = ai.tripl.arc.util.Utils.getContextOrSparkClassLoader
 
