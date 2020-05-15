@@ -1,7 +1,8 @@
 # Change Log
 
-## 2.3.4
+## 2.4.0
 
+- add ability to display multiple table views when execution stages which have multiple outputs
 - **FIX** restore the ability for user to be able to define `fs.s3a.aws.credentials.provider` overrides via `conf_spark_hadoop_fs_s3a_aws_credentials_provider=`
 
 ## 2.3.3
