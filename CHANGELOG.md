@@ -1,8 +1,11 @@
 # Change Log
 
-## 2.3.4
+## 2.4.0
 
+- add ability to display multiple table views when execution stages which have multiple outputs
+- add `%log` magic which invokes `LogExecute`
 - **FIX** restore the ability for user to be able to define `fs.s3a.aws.credentials.provider` overrides via `conf_spark_hadoop_fs_s3a_aws_credentials_provider=`
+- add `CONF_MASTER`, `CONF_NUM_ROWS`, `CONF_TRUNCATE`, `CONF_STREAMING_DURATION`, `CONF_STREAMING_FREQUENCY`, `CONF_DISPLAY_MONOSPACE`, `CONF_DISPLAY_LEFT_ALIGN` and `CONF_DISPLAY_DATASET_LABELS` to be able to set options via environment variables.
 
 ## 2.3.3
 

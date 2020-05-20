@@ -6,6 +6,7 @@ import java.util.ServiceLoader
 import java.security.SecureRandom
 import scala.collection.JavaConverters._
 import scala.util.Try
+import scala.util.Properties._
 import util.control.Breaks._
 
 import almond.interpreter.{Completion, ExecuteResult, Inspection, Interpreter}
@@ -15,8 +16,6 @@ import scala.concurrent.{Await, ExecutionContext, Future}
 import almond.interpreter.input.InputManager
 import almond.protocol.internal.ExtraCodecs._
 import almond.protocol.KernelInfo
-import argonaut._
-import argonaut.Argonaut._
 
 import org.apache.commons.lang3.time.DurationFormatUtils
 import org.apache.spark.sql._
@@ -47,21 +46,20 @@ final class ArcInterpreter extends Interpreter {
 
   implicit var spark: SparkSession = _
 
-  val secureRandom = new SecureRandom()
-  val randomBytes = new Array[Byte](64)
-  secureRandom.nextBytes(randomBytes)
+  val autenticateSecret = Common.randStr(64)
 
   val secretPattern = """"(token|signature|accessKey|secret|secretAccessKey)":[\s]*".*"""".r
 
-  var confMaster: String = "local[*]"
-  var confNumRows = 20
-  var confTruncate = 50
   var confCommandLineArgs: Map[String, ConfigValue] = Map.empty
+  var confMaster = envOrNone("CONF_MASTER").getOrElse("local[*]")
+  var confNumRows = Try(envOrNone("CONF_NUM_ROWS").get.toInt).getOrElse(20)
+  var confTruncate = Try(envOrNone("CONF_TRUNCATE").get.toInt).getOrElse(50)
   var confStreaming = false
-  var confStreamingDuration = 10
-  var confStreamingFrequency = 1000
-  var confMonospace = false
-  var confLeftAlign = false
+  var confStreamingDuration = Try(envOrNone("CONF_STREAMING_DURATION").get.toInt).getOrElse(10)
+  var confStreamingFrequency = Try(envOrNone("CONF_STREAMING_FREQUENCY").get.toInt).getOrElse(1000)
+  var confMonospace = Try(envOrNone("CONF_DISPLAY_MONOSPACE").get.toBoolean).getOrElse(false)
+  var confLeftAlign = Try(envOrNone("CONF_DISPLAY_LEFT_ALIGN").get.toBoolean).getOrElse(false)
+  var confDatasetLabels = Try(envOrNone("CONF_DISPLAY_DATASET_LABELS").get.toBoolean).getOrElse(false)
   var udfsRegistered = false
 
   var isJupyterLab: Option[Boolean] = None
@@ -70,6 +68,7 @@ final class ArcInterpreter extends Interpreter {
   var memoizedPipelineStagePlugins: Option[List[ai.tripl.arc.plugins.PipelineStagePlugin]] = None
   var memoizedUDFPlugins: Option[List[ai.tripl.arc.plugins.UDFPlugin]] = None
   var memoizedDynamicConfigPlugins: Option[List[ai.tripl.arc.plugins.DynamicConfigurationPlugin]] = None
+  var memoizedLifecyclePlugins: Option[List[ai.tripl.arc.plugins.LifecyclePlugin]] = None
 
   // cache userData so state can be preserved between executions
   var memoizedUserData: collection.mutable.Map[String, Object] = collection.mutable.Map.empty
@@ -90,17 +89,13 @@ final class ArcInterpreter extends Interpreter {
 
   @volatile private var count = 0
 
-  val alpha = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-  val size = alpha.size
-  def randStr(n:Int) = (1 to n).map(x => alpha(secureRandom.nextInt.abs % size)).mkString
-
   def execute(
     code: String,
     storeHistory: Boolean,
     inputManager: Option[InputManager],
     outputHandler: Option[OutputHandler]
   ): ExecuteResult = {
-    val listenerElementHandle = randStr(32)
+    val listenerElementHandle = Common.randStr(32)
     var executionListener: Option[ProgressSparkListener] = None
 
     try {
@@ -112,7 +107,7 @@ final class ArcInterpreter extends Interpreter {
       // the JVM requested memory (-Xmx)
       val runtimeMemorySize = Runtime.getRuntime.maxMemory
       val executeResult = if (runtimeMemorySize > physicalMemorySize) {
-        return ExecuteResult.Error(s"Cannot execute as requested JVM memory (-Xmx${runtimeMemorySize}B) exceeds available Docker memory (${physicalMemorySize}B) limit.\nEither decrease the requested JVM memory or increase the Docker memory limit.")
+        return ExecuteResult.Error(s"Cannot execute as requested JVM memory (-Xmx${runtimeMemorySize}B) exceeds available system memory (${physicalMemorySize}B) limit.\nEither decrease the requested JVM memory or, if running in Docker, increase the Docker memory limit.")
       } else {
 
         val firstRun = SparkSession.getActiveSession.isEmpty
@@ -125,16 +120,16 @@ final class ArcInterpreter extends Interpreter {
           .config("spark.rdd.compress", true)
           .config("spark.sql.cbo.enabled", true)
           .config("spark.authenticate", true)
-          .config("spark.authenticate.secret", new String(java.util.Base64.getEncoder.encode(randomBytes)))
+          .config("spark.authenticate.secret", autenticateSecret)
           .config("spark.io.encryption.enable", true)
           .config("spark.network.crypto.enabled", true)
-          .config("spark.driver.maxResultSize", s"${(runtimeMemorySize * 0.8).toLong}b")
+          .config("spark.driver.maxResultSize", s"${(runtimeMemorySize * 0.8).toLong}B")
 
         // add any spark overrides
         System.getenv.asScala
-          .filter{ case (key, _) => key.startsWith("conf_") }
+          .filter{ case (key, _) => key.startsWith("conf_spark") }
           // apply hadoop options after spark session creation
-          .filter{ case (key, _) => !key.startsWith("conf_spark_hadoop") }          
+          .filter{ case (key, _) => !key.startsWith("conf_spark_hadoop") }
           // you cannot override these settings for security
           .filter{ case (key, _) => !Seq("conf_spark_authenticate", "conf_spark_authenticate_secret", "conf_spark_io_encryption_enable", "conf_spark_network_crypto_enabled").contains(key) }
           .foldLeft(sessionBuilder: SparkSession.Builder){ case (sessionBuilder, (key: String, value: String)) => {
@@ -149,7 +144,7 @@ final class ArcInterpreter extends Interpreter {
           .filter{ case (key, _) => key.startsWith("conf_spark_hadoop") }
           .foreach{ case (key: String, value: String) => {
             spark.sparkContext.hadoopConfiguration.set(key.replaceFirst("conf_spark_hadoop","").replaceAll("_", "."), value)
-          }}        
+          }}
 
         val loader = ai.tripl.arc.util.Utils.getContextOrSparkClassLoader
 
@@ -165,6 +160,8 @@ final class ArcInterpreter extends Interpreter {
             .field("hadoopVersion", org.apache.hadoop.util.VersionInfo.getVersion)
             .field("scalaVersion", scala.util.Properties.versionNumberString)
             .field("javaVersion", System.getProperty("java.runtime.version"))
+            .field("runtimeMemorySize", s"${runtimeMemorySize}B")
+            .field("physicalMemorySize", s"${physicalMemorySize}B")
             .log()
 
           // only set default aws provider override if not provided
@@ -186,10 +183,10 @@ final class ArcInterpreter extends Interpreter {
         // parse input
         val lines = code.trim.split("\n")
         val (interpreter, commandArgs, command) = lines(0) match {
-          case x: String if (x.startsWith("%arc")) => {
+          case x if (x.startsWith("%arc")) => {
             ("arc", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
-          case x: String if (x.startsWith("%sql")) => {
+          case x if (x.startsWith("%sql") || x.startsWith("%log")) => {
             val commandArgs = parseArgs(lines(0))
             val name = commandArgs.get("name") match {
               case Some(name) => name
@@ -205,67 +202,79 @@ final class ArcInterpreter extends Interpreter {
               case None => Map[String, String]()
             }
             val params = envParams ++ sqlParams
+            val stmt = SQLUtils.injectParameters(lines.drop(1).mkString("\n"), params, true)
             ("arc", parseArgs(lines(0)),
-              if (lines(0).startsWith("%sqlvalidate")) {
-                s"""{
-                |  "type": "SQLValidate",
-                |  "name": "${name}",
-                |  "description": "${description}",
-                |  "environments": [],
-                |  "sql": \"\"\"${SQLUtils.injectParameters(lines.drop(1).mkString("\n"), params, true )}\"\"\",
-                |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "numRows", "truncate", "persist", "monospace", "leftAlign", "streamingDuration").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
-                |}""".stripMargin
-              } else {
-                s"""{
-                |  "type": "SQLTransform",
-                |  "name": "${name}",
-                |  "description": "${description}",
-                |  "environments": [],
-                |  "sql": \"\"\"${SQLUtils.injectParameters(lines.drop(1).mkString("\n"), params, true )}\"\"\",
-                |  "outputView": "${commandArgs.getOrElse("outputView", randStr(32))}",
-                |  "persist": ${commandArgs.getOrElse("persist", "false")},
-                |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "outputView", "numRows", "truncate", "persist", "monospace", "leftAlign", "streamingDuration").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
-                |}""".stripMargin
+              lines(0) match {
+                case x if x.startsWith("%sqlvalidate") =>
+                  s"""{
+                    |  "type": "SQLValidate",
+                    |  "name": "${name}",
+                    |  "description": "${description}",
+                    |  "environments": [],
+                    |  "sql": \"\"\"${stmt}\"\"\",
+                    |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "numRows", "truncate", "persist", "monospace", "leftAlign", "datasetLabels", "streamingDuration").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
+                    |}""".stripMargin
+                case x if x.startsWith("%sql") =>
+                  s"""{
+                    |  "type": "SQLTransform",
+                    |  "name": "${name}",
+                    |  "description": "${description}",
+                    |  "environments": [],
+                    |  "sql": \"\"\"${stmt}\"\"\",
+                    |  "outputView": "${commandArgs.getOrElse("outputView", Common.randStr(32))}",
+                    |  "persist": ${commandArgs.getOrElse("persist", "false")},
+                    |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "outputView", "numRows", "truncate", "persist", "monospace", "leftAlign", "datasetLabels", "datasetLabels", "streamingDuration").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
+                    |}""".stripMargin
+                case x if x.startsWith("%log") =>
+                  s"""{
+                    |  "type": "LogExecute",
+                    |  "name": "${name}",
+                    |  "description": "${description}",
+                    |  "environments": [],
+                    |  "sql": \"\"\"${stmt}\"\"\",
+                    |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "numRows", "truncate", "persist", "monospace", "leftAlign", "datasetLabels", "streamingDuration").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
+                    |}""".stripMargin
+                case _ => ""
               }
             )
           }
-          case x: String if (x.startsWith("%cypher")) => {
+          case x if (x.startsWith("%cypher")) => {
             ("cypher", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
-          case x: String if (x.startsWith("%configplugin")) => {
+          case x if (x.startsWith("%configplugin")) => {
             ("configplugin", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
-          case x: String if (x.startsWith("%lifecycleplugin")) => {
+          case x if (x.startsWith("%lifecycleplugin")) => {
             ("lifecycleplugin", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
-          case x: String if (x.startsWith("%schema")) => {
+          case x if (x.startsWith("%schema")) => {
             ("schema", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
-          case x: String if (x.startsWith("%printschema")) => {
+          case x if (x.startsWith("%printschema")) => {
             ("printschema", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
-          case x: String if (x.startsWith("%metadata")) => {
+          case x if (x.startsWith("%metadata")) => {
             ("metadata", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
-          case x: String if (x.startsWith("%printmetadata")) => {
+          case x if (x.startsWith("%printmetadata")) => {
             ("printmetadata", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
-          case x: String if (x.startsWith("%summary")) => {
+          case x if (x.startsWith("%summary")) => {
             ("summary", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
-          case x: String if (x.startsWith("%env")) => {
+          case x if (x.startsWith("%env")) => {
             ("env", parseArgs(lines.mkString(" ")), "")
           }
-          case x: String if (x.startsWith("%secret")) => {
+          case x if (x.startsWith("%secret")) => {
             ("secret", parseArgs(lines.mkString(" ")), lines.drop(1).mkString("\n"))
           }
-          case x: String if (x.startsWith("%conf")) => {
+          case x if (x.startsWith("%conf")) => {
             ("conf", parseArgs(lines.mkString(" ")), "")
           }
-          case x: String if (x.startsWith("%version")) => {
+          case x if (x.startsWith("%version")) => {
             ("version", parseArgs(lines(0)), "")
           }
-          case x: String if (x.startsWith("%help")) => {
+          case x if (x.startsWith("%help")) => {
             ("help", parseArgs(""), "")
           }
           case _ => ("arc", collection.mutable.Map[String, String](), code.trim)
@@ -277,6 +286,7 @@ final class ArcInterpreter extends Interpreter {
         val persist = Try(commandArgs.get("persist").get.toBoolean).getOrElse(false)
         val monospace = Try(commandArgs.get("monospace").get.toBoolean).getOrElse(confMonospace)
         val leftAlign = Try(commandArgs.get("leftAlign").get.toBoolean).getOrElse(confLeftAlign)
+        val datasetLabels = Try(commandArgs.get("datasetLabels").get.toBoolean).getOrElse(confDatasetLabels)
 
         // store previous values so that the ServiceLoader resolution is not called each run
         val pipelineStagePlugins = memoizedPipelineStagePlugins match {
@@ -300,6 +310,13 @@ final class ArcInterpreter extends Interpreter {
             memoizedDynamicConfigPlugins.get
           }
         }
+        val lifecyclePlugins = memoizedLifecyclePlugins match {
+          case Some(lifecyclePlugins) => lifecyclePlugins
+          case None => {
+            memoizedLifecyclePlugins = Option(ServiceLoader.load(classOf[LifecyclePlugin], loader).iterator().asScala.toList)
+            memoizedLifecyclePlugins.get
+          }
+        }
 
         implicit val arcContext = ARCContext(
           jobId=None,
@@ -313,7 +330,7 @@ final class ArcInterpreter extends Interpreter {
           storageLevel=StorageLevel.MEMORY_AND_DISK_SER,
           immutableViews=false,
           dynamicConfigurationPlugins=dynamicConfigsPlugins,
-          lifecyclePlugins=Nil,
+          lifecyclePlugins=lifecyclePlugins,
           activeLifecyclePlugins=Nil,
           pipelineStagePlugins=pipelineStagePlugins,
           udfPlugins=udfPlugins,
@@ -330,7 +347,8 @@ final class ArcInterpreter extends Interpreter {
         outputHandler match {
           case Some(outputHandler) => {
             interpreter match {
-              case "arc" | "summary" | "cypher" => {
+              case "arc" | "summary" => {
+                arcContext.userData += ("outputHandler" -> outputHandler)
                 val listener = new ProgressSparkListener(listenerElementHandle, jupyterLab)(outputHandler, logger)
                 listener.init()(outputHandler)
                 spark.sparkContext.addSparkListener(listener)
@@ -348,20 +366,36 @@ final class ArcInterpreter extends Interpreter {
             secretPattern.findFirstIn(command) match {
               case Some(_) => ExecuteResult.Error("Secret found in input. Use %secret to define to prevent accidental leaks.")
               case None => {
-                val pipelineEither = ArcPipeline.parseConfig(Left(s"""{"stages": [${command}]}"""), arcContext)
+                val pipelineEither = ArcPipeline.parseConfig(Left(
+                  s"""{
+                    "plugins": {
+                      "lifecycle": [
+                        {
+                          "type": "OutputTable",
+                          "numRows": ${numRows},
+                          "truncate": ${truncate},
+                          "monospace": ${monospace},
+                          "leftAlign": ${leftAlign},
+                          "datasetLabels": ${datasetLabels}
+                        }
+                      ]
+                    },
+                    "stages": [${command}]
+                  }""")
+                  , arcContext)
 
                 pipelineEither match {
                   case Left(errors) => ExecuteResult.Error(ai.tripl.arc.config.Error.pipelineSimpleErrorMsg(errors, false))
-                  case Right((pipeline, _)) => {
+                  case Right((pipeline, arcCtx)) => {
                     pipeline.stages.length match {
                       case 0 => {
                         ExecuteResult.Error("No stages found.")
                       }
                       case _ => {
-                        ARC.run(pipeline) match {
+                        ARC.run(pipeline)(spark, logger, arcCtx) match {
                           case Some(df) => {
-                            val result = renderResult(outputHandler, df, numRows, truncate, monospace, leftAlign, streamingDuration)
-                            memoizedUserData = arcContext.userData
+                            val result = Common.renderResult(spark, outputHandler, pipeline.stages.lastOption, df, numRows, truncate, monospace, leftAlign, datasetLabels, streamingDuration, confStreamingFrequency)
+                            memoizedUserData = arcCtx.userData
                             result
                           }
                           case None => {
@@ -411,7 +445,7 @@ final class ArcInterpreter extends Interpreter {
             }
             if (persist) df.persist(StorageLevel.MEMORY_AND_DISK_SER)
             ExecuteResult.Success(
-              DisplayData.html(renderHTML(df, numRows, truncate, monospace, leftAlign))
+              DisplayData.html(Common.renderHTML(df, None, numRows, truncate, monospace, leftAlign, datasetLabels))
             )
           }
           case "printmetadata" => {
@@ -427,7 +461,7 @@ final class ArcInterpreter extends Interpreter {
             }
             if (persist) df.persist(StorageLevel.MEMORY_AND_DISK_SER)
             ExecuteResult.Success(
-              DisplayData.html(renderHTML(df, numRows, truncate, monospace, leftAlign))
+              DisplayData.html(Common.renderHTML(df, None, numRows, truncate, monospace, leftAlign, datasetLabels))
             )
           }
           case "env" => {
@@ -490,6 +524,16 @@ final class ArcInterpreter extends Interpreter {
               }
               case None =>
             }
+            commandArgs.get("datasetLabels") match {
+              case Some(datasetLabels) => {
+                try {
+                  confDatasetLabels = datasetLabels.toBoolean
+                } catch {
+                  case e: Exception =>
+                }
+              }
+              case None =>
+            }
             commandArgs.get("streamingDuration") match {
               case Some(streamingDuration) => {
                 try {
@@ -509,10 +553,11 @@ final class ArcInterpreter extends Interpreter {
             |streamingDuration: ${confStreamingDuration}
             |
             |Display Options:
-            |numRows: ${confNumRows}
-            |truncate: ${confTruncate}
+            |datasetLabels: ${confDatasetLabels}
             |leftAlign: ${leftAlign}
             |monospace: ${confMonospace}
+            |numRows: ${confNumRows}
+            |truncate: ${confTruncate}
             """.stripMargin
             ExecuteResult.Success(
               DisplayData.text(text)
@@ -520,12 +565,12 @@ final class ArcInterpreter extends Interpreter {
           }
           case "version" => {
             ExecuteResult.Success(
-              DisplayData.text(Common.GetVersion())
+              DisplayData.text(Common.getVersion)
             )
           }
           case "help" => {
             ExecuteResult.Success(
-              DisplayData.text(Common.GetHelp)
+              DisplayData.text(Common.getHelp)
             )
           }
         }
@@ -556,127 +601,6 @@ final class ArcInterpreter extends Interpreter {
     }
   }
 
-  def renderResult(outputHandler: Option[OutputHandler], df: DataFrame, numRows: Int, truncate: Int, monospace: Boolean, leftAlign: Boolean, streamingDuration: Int) = {
-    if (!df.isStreaming) {
-      ExecuteResult.Success(
-        DisplayData.html(renderHTML(df, numRows, truncate, monospace, leftAlign))
-      )
-    } else {
-      outputHandler match {
-        case Some(outputHandler) => {
-          // create a random name for the element to update
-          val outputElementHandle = randStr(32)
-
-          // create a random name for the stream
-          val queryName = randStr(32)
-
-          // start a stream
-          val writeStream = df.writeStream
-            .format("memory")
-            .outputMode("append")
-            .queryName(queryName)
-            .start
-
-          // periodically update results on screen
-          val endTime = System.currentTimeMillis + (streamingDuration * 1000)
-          var initial = true
-
-          breakable {
-            while (System.currentTimeMillis <= endTime) {
-
-              val df = spark.table(queryName)
-              df.persist
-
-              val count = df.count
-              // create the html handle on the first run
-              if (initial) {
-                outputHandler.html(
-                  renderHTML(df, numRows, truncate, monospace, leftAlign),
-                  outputElementHandle
-                )
-                initial = false
-              } else {
-                outputHandler.updateHtml(
-                  renderHTML(df, numRows, truncate, monospace, leftAlign),
-                  outputElementHandle
-                )
-              }
-
-              df.unpersist
-
-              if (count > numRows) {
-                break
-              }
-              Thread.sleep(confStreamingFrequency)
-            }
-          }
-
-          // stop stream and display final result
-          writeStream.stop
-          outputHandler.html("", outputElementHandle)
-          ExecuteResult.Success(
-            DisplayData.html(renderHTML(spark.table(queryName), numRows, truncate, monospace, leftAlign))
-          )
-        }
-        case None => ExecuteResult.Error("No result.")
-      }
-    }
-  }
-
-  def currentLine(): Int =
-    count
-
-  def renderHTML(df: DataFrame, numRows: Int, truncate: Int, monospace: Boolean, leftAlign: Boolean): String = {
-    import xml.Utility.escape
-
-    val header = df.columns
-
-    // add index to all the column names so they are unique
-    val renamedDF = df.toDF(df.columns.zipWithIndex.map { case (col, idx) => s"${col}${idx}" }:_*)
-
-    // this code has come from the spark Dataset class:
-    val castCols = renamedDF.schema.map { field =>
-      // explicitly wrap names to fix any nested select problems
-      val fieldName = s"`${field.name}`"
-
-      // Since binary types in top-level schema fields have a specific format to print,
-      // so we do not cast them to strings here.
-      field.dataType match {
-        case BinaryType => col(fieldName)
-        // replace commas (from format_number), replace any trailing zeros (but leave at least one character after the .)
-        case DoubleType => regexp_replace(regexp_replace(regexp_replace(format_number(col(fieldName), 10),",",""),"(?<=.[0-9]{2})0+$",""),"^\\.","0.")
-        case x: DecimalType => regexp_replace(format_number(col(fieldName), x.scale),",","")
-        case _ => col(fieldName).cast(StringType)
-      }
-    }
-    val data = renamedDF.select(castCols: _*).take(numRows)
-
-    // For array values, replace Seq and Array with square brackets
-    // For cells that are beyond `truncate` characters, replace it with the
-    // first `truncate-3` and "..."
-    val rows = data.map { row =>
-      row.toSeq.map { cell =>
-        val str = cell match {
-          case null => "null"
-          case binary: Array[Byte] => binary.map("%02X".format(_)).mkString("[", " ", "]")
-          case _ => cell.toString
-        }
-        if (truncate > 0 && str.length > truncate) {
-          // do not show ellipses for strings shorter than 4 characters.
-          if (truncate < 4) str.substring(0, truncate)
-          else str.substring(0, truncate - 3) + "..."
-        } else {
-          str
-        }
-      }: Seq[String]
-    }
-
-    val monospaceClass = if (monospace) "monospace" else ""
-    val leftAlignClass = if (leftAlign) "leftalign" else ""
-
-    s"""<table class="tex2jax_ignore ${monospaceClass} ${leftAlignClass}"><tr>${header.map(h => s"<th>${escape(h)}</th>").mkString}</tr>${rows.map { row => s"<tr>${row.map { cell => s"<td>${escape(cell)}</td>" }.mkString}</tr>"}.mkString}</table>"""
-  }
-
   def parseArgs(input: String): collection.mutable.Map[String, String] = {
     val args = collection.mutable.Map[String, String]()
     val (vals, opts) = input.split("\\s(?=([^\"']*\"[^\"]*\")*[^\"']*$)").partition {
@@ -693,4 +617,5 @@ final class ArcInterpreter extends Interpreter {
     args
   }
 
+  def currentLine(): Int = count
 }

@@ -60,8 +60,7 @@ final class ProgressSparkListener(executionId: String, isJupyterLab: Boolean)(im
     outputHandler.html(
       s"""<div class="progress arc-background">
         |  <div class="progress-bar arc-complete" style="width: 0%;">0 / 0</div>
-        |</div>
-        |""".stripMargin,
+        |</div>""".stripMargin,
       executionId
     )
   }
