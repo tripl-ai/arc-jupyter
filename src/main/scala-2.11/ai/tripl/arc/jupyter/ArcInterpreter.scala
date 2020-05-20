@@ -161,6 +161,7 @@ final class ArcInterpreter extends Interpreter {
             .field("scalaVersion", scala.util.Properties.versionNumberString)
             .field("javaVersion", System.getProperty("java.runtime.version"))
             .field("runtimeMemorySize", s"${runtimeMemorySize}B")
+            .field("physicalMemorySize", s"${physicalMemorySize}B")
             .log()
 
           // only set default aws provider override if not provided
