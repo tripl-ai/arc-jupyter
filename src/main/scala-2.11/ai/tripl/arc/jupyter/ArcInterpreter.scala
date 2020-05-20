@@ -6,6 +6,7 @@ import java.util.ServiceLoader
 import java.security.SecureRandom
 import scala.collection.JavaConverters._
 import scala.util.Try
+import scala.util.Properties._
 import util.control.Breaks._
 
 import almond.interpreter.{Completion, ExecuteResult, Inspection, Interpreter}
@@ -49,16 +50,16 @@ final class ArcInterpreter extends Interpreter {
 
   val secretPattern = """"(token|signature|accessKey|secret|secretAccessKey)":[\s]*".*"""".r
 
-  var confMaster: String = "local[*]"
-  var confNumRows = 20
-  var confTruncate = 50
   var confCommandLineArgs: Map[String, ConfigValue] = Map.empty
+  var confMaster = envOrNone("CONF_MASTER").getOrElse("local[*]")
+  var confNumRows = Try(envOrNone("CONF_NUM_ROWS").get.toInt).getOrElse(20)
+  var confTruncate = Try(envOrNone("CONF_TRUNCATE").get.toInt).getOrElse(50)
   var confStreaming = false
-  var confStreamingDuration = 10
-  var confStreamingFrequency = 1000
-  var confMonospace = false
-  var confLeftAlign = false
-  var confDatasetLabels = false
+  var confStreamingDuration = Try(envOrNone("CONF_STREAMING_DURATION").get.toInt).getOrElse(10)
+  var confStreamingFrequency = Try(envOrNone("CONF_STREAMING_FREQUENCY").get.toInt).getOrElse(1000)
+  var confMonospace = Try(envOrNone("CONF_DISPLAY_MONOSPACE").get.toBoolean).getOrElse(false)
+  var confLeftAlign = Try(envOrNone("CONF_DISPLAY_LEFT_ALIGN").get.toBoolean).getOrElse(false)
+  var confDatasetLabels = Try(envOrNone("CONF_DISPLAY_DATASET_LABELS").get.toBoolean).getOrElse(false)
   var udfsRegistered = false
 
   var isJupyterLab: Option[Boolean] = None
@@ -180,10 +181,10 @@ final class ArcInterpreter extends Interpreter {
         // parse input
         val lines = code.trim.split("\n")
         val (interpreter, commandArgs, command) = lines(0) match {
-          case x: String if (x.startsWith("%arc")) => {
+          case x if (x.startsWith("%arc")) => {
             ("arc", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
-          case x: String if (x.startsWith("%sql")) => {
+          case x if (x.startsWith("%sql") || x.startsWith("%log")) => {
             val commandArgs = parseArgs(lines(0))
             val name = commandArgs.get("name") match {
               case Some(name) => name
@@ -199,67 +200,79 @@ final class ArcInterpreter extends Interpreter {
               case None => Map[String, String]()
             }
             val params = envParams ++ sqlParams
+            val stmt = SQLUtils.injectParameters(lines.drop(1).mkString("\n"), params, true)
             ("arc", parseArgs(lines(0)),
-              if (lines(0).startsWith("%sqlvalidate")) {
-                s"""{
-                |  "type": "SQLValidate",
-                |  "name": "${name}",
-                |  "description": "${description}",
-                |  "environments": [],
-                |  "sql": \"\"\"${SQLUtils.injectParameters(lines.drop(1).mkString("\n"), params, true )}\"\"\",
-                |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "numRows", "truncate", "persist", "monospace", "leftAlign", "streamingDuration").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
-                |}""".stripMargin
-              } else {
-                s"""{
-                |  "type": "SQLTransform",
-                |  "name": "${name}",
-                |  "description": "${description}",
-                |  "environments": [],
-                |  "sql": \"\"\"${SQLUtils.injectParameters(lines.drop(1).mkString("\n"), params, true )}\"\"\",
-                |  "outputView": "${commandArgs.getOrElse("outputView", Common.randStr(32))}",
-                |  "persist": ${commandArgs.getOrElse("persist", "false")},
-                |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "outputView", "numRows", "truncate", "persist", "monospace", "leftAlign", "streamingDuration").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
-                |}""".stripMargin
+              lines(0) match {
+                case x if x.startsWith("%sqlvalidate") =>
+                  s"""{
+                    |  "type": "SQLValidate",
+                    |  "name": "${name}",
+                    |  "description": "${description}",
+                    |  "environments": [],
+                    |  "sql": \"\"\"${stmt}\"\"\",
+                    |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "numRows", "truncate", "persist", "monospace", "leftAlign", "datasetLabels", "streamingDuration").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
+                    |}""".stripMargin
+                case x if x.startsWith("%sql") =>
+                  s"""{
+                    |  "type": "SQLTransform",
+                    |  "name": "${name}",
+                    |  "description": "${description}",
+                    |  "environments": [],
+                    |  "sql": \"\"\"${stmt}\"\"\",
+                    |  "outputView": "${commandArgs.getOrElse("outputView", Common.randStr(32))}",
+                    |  "persist": ${commandArgs.getOrElse("persist", "false")},
+                    |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "outputView", "numRows", "truncate", "persist", "monospace", "leftAlign", "datasetLabels", "datasetLabels", "streamingDuration").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
+                    |}""".stripMargin
+                case x if x.startsWith("%log") =>
+                  s"""{
+                    |  "type": "LogExecute",
+                    |  "name": "${name}",
+                    |  "description": "${description}",
+                    |  "environments": [],
+                    |  "sql": \"\"\"${stmt}\"\"\",
+                    |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "numRows", "truncate", "persist", "monospace", "leftAlign", "datasetLabels", "streamingDuration").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
+                    |}""".stripMargin
+                case _ => ""
               }
             )
           }
-          case x: String if (x.startsWith("%cypher")) => {
+          case x if (x.startsWith("%cypher")) => {
             ("cypher", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
-          case x: String if (x.startsWith("%configplugin")) => {
+          case x if (x.startsWith("%configplugin")) => {
             ("configplugin", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
-          case x: String if (x.startsWith("%lifecycleplugin")) => {
+          case x if (x.startsWith("%lifecycleplugin")) => {
             ("lifecycleplugin", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
-          case x: String if (x.startsWith("%schema")) => {
+          case x if (x.startsWith("%schema")) => {
             ("schema", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
-          case x: String if (x.startsWith("%printschema")) => {
+          case x if (x.startsWith("%printschema")) => {
             ("printschema", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
-          case x: String if (x.startsWith("%metadata")) => {
+          case x if (x.startsWith("%metadata")) => {
             ("metadata", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
-          case x: String if (x.startsWith("%printmetadata")) => {
+          case x if (x.startsWith("%printmetadata")) => {
             ("printmetadata", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
-          case x: String if (x.startsWith("%summary")) => {
+          case x if (x.startsWith("%summary")) => {
             ("summary", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
-          case x: String if (x.startsWith("%env")) => {
+          case x if (x.startsWith("%env")) => {
             ("env", parseArgs(lines.mkString(" ")), "")
           }
-          case x: String if (x.startsWith("%secret")) => {
+          case x if (x.startsWith("%secret")) => {
             ("secret", parseArgs(lines.mkString(" ")), lines.drop(1).mkString("\n"))
           }
-          case x: String if (x.startsWith("%conf")) => {
+          case x if (x.startsWith("%conf")) => {
             ("conf", parseArgs(lines.mkString(" ")), "")
           }
-          case x: String if (x.startsWith("%version")) => {
+          case x if (x.startsWith("%version")) => {
             ("version", parseArgs(lines(0)), "")
           }
-          case x: String if (x.startsWith("%help")) => {
+          case x if (x.startsWith("%help")) => {
             ("help", parseArgs(""), "")
           }
           case _ => ("arc", collection.mutable.Map[String, String](), code.trim)
@@ -301,7 +314,7 @@ final class ArcInterpreter extends Interpreter {
             memoizedLifecyclePlugins = Option(ServiceLoader.load(classOf[LifecyclePlugin], loader).iterator().asScala.toList)
             memoizedLifecyclePlugins.get
           }
-        }        
+        }
 
         implicit val arcContext = ARCContext(
           jobId=None,
@@ -332,7 +345,7 @@ final class ArcInterpreter extends Interpreter {
         outputHandler match {
           case Some(outputHandler) => {
             interpreter match {
-              case "arc" | "summary" | "cypher" => {
+              case "arc" | "summary" => {
                 arcContext.userData += ("outputHandler" -> outputHandler)
                 val listener = new ProgressSparkListener(listenerElementHandle, jupyterLab)(outputHandler, logger)
                 listener.init()(outputHandler)
@@ -395,7 +408,7 @@ final class ArcInterpreter extends Interpreter {
             }
           }
           case "cypher" => {
-            ExecuteResult.Error("%cypher not supported with Scala 2.11")            
+            ExecuteResult.Error("%cypher not supported with Scala 2.11")
           }
           case "configplugin" => {
             val config = ConfigFactory.parseString(s"""{"plugins": {"config": [${command}]}}""", ConfigParseOptions.defaults().setSyntax(ConfigSyntax.CONF))
@@ -518,7 +531,7 @@ final class ArcInterpreter extends Interpreter {
                 }
               }
               case None =>
-            }            
+            }
             commandArgs.get("streamingDuration") match {
               case Some(streamingDuration) => {
                 try {
@@ -602,5 +615,5 @@ final class ArcInterpreter extends Interpreter {
     args
   }
 
-  def currentLine(): Int = count  
+  def currentLine(): Int = count
 }
