@@ -109,7 +109,7 @@ final class ArcInterpreter extends Interpreter {
       // the JVM requested memory (-Xmx)
       val runtimeMemorySize = Runtime.getRuntime.maxMemory
       val executeResult = if (runtimeMemorySize > physicalMemorySize) {
-        return ExecuteResult.Error(s"Cannot execute as requested JVM memory (-Xmx${runtimeMemorySize}B) exceeds available Docker memory (${physicalMemorySize}B) limit.\nEither decrease the requested JVM memory or increase the Docker memory limit.")
+        return ExecuteResult.Error(s"Cannot execute as requested JVM memory (-Xmx${runtimeMemorySize}B) exceeds available system memory (${physicalMemorySize}B) limit.\nEither decrease the requested JVM memory or, if running in Docker, increase the Docker memory limit.")
       } else {
 
         val firstRun = SparkSession.getActiveSession.isEmpty
@@ -125,7 +125,7 @@ final class ArcInterpreter extends Interpreter {
           .config("spark.authenticate.secret", autenticateSecret)
           .config("spark.io.encryption.enable", true)
           .config("spark.network.crypto.enabled", true)
-          .config("spark.driver.maxResultSize", s"${(runtimeMemorySize * 0.8).toLong}b")
+          .config("spark.driver.maxResultSize", s"${(runtimeMemorySize * 0.8).toLong}B")
 
         // add any spark overrides
         System.getenv.asScala
@@ -162,6 +162,7 @@ final class ArcInterpreter extends Interpreter {
             .field("hadoopVersion", org.apache.hadoop.util.VersionInfo.getVersion)
             .field("scalaVersion", scala.util.Properties.versionNumberString)
             .field("javaVersion", System.getProperty("java.runtime.version"))
+            .field("runtimeMemorySize", s"${runtimeMemorySize}B")
             .log()
 
           // only set default aws provider override if not provided
