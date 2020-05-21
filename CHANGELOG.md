@@ -1,5 +1,9 @@
 # Change Log
 
+## 2.4.1
+
+- consistently log memory availablility and assigned.
+
 ## 2.4.0
 
 - add ability to display multiple table views when execution stages which have multiple outputs

@@ -4,6 +4,8 @@ import java.util.UUID
 import java.util.Properties
 import java.util.ServiceLoader
 import java.security.SecureRandom
+import java.lang.management.ManagementFactory
+
 import scala.collection.JavaConverters._
 import scala.util.Try
 import scala.util.Properties._
@@ -37,7 +39,6 @@ import ai.tripl.arc.util.SQLUtils
 import ai.tripl.arc.util.log.LoggerFactory
 import ai.tripl.arc.util.SerializableConfiguration
 
-import java.lang.management.ManagementFactory
 
 case class ConfigValue (
   secret: Boolean,
@@ -105,11 +106,11 @@ final class ArcInterpreter extends Interpreter {
       Logger.getLogger("breeze").setLevel(Level.ERROR)
 
       // the memory available to the container (i.e. the docker memory limit)
-      val physicalMemorySize = ManagementFactory.getOperatingSystemMXBean.asInstanceOf[com.sun.management.OperatingSystemMXBean].getTotalPhysicalMemorySize
+      val physicalMemory = ManagementFactory.getOperatingSystemMXBean.asInstanceOf[com.sun.management.OperatingSystemMXBean].getTotalPhysicalMemorySize
       // the JVM requested memory (-Xmx)
-      val runtimeMemorySize = Runtime.getRuntime.maxMemory
-      val executeResult = if (runtimeMemorySize > physicalMemorySize) {
-        return ExecuteResult.Error(s"Cannot execute as requested JVM memory (-Xmx${runtimeMemorySize}B) exceeds available system memory (${physicalMemorySize}B) limit.\nEither decrease the requested JVM memory or, if running in Docker, increase the Docker memory limit.")
+      val runtimeMemory = Runtime.getRuntime.maxMemory
+      val executeResult = if (runtimeMemory > physicalMemory) {
+        return ExecuteResult.Error(s"Cannot execute as requested JVM memory (-Xmx${runtimeMemory}B) exceeds available system memory (${physicalMemory}B) limit.\nEither decrease the requested JVM memory or, if running in Docker, increase the Docker memory limit.")
       } else {
 
         val firstRun = SparkSession.getActiveSession.isEmpty
@@ -125,7 +126,7 @@ final class ArcInterpreter extends Interpreter {
           .config("spark.authenticate.secret", autenticateSecret)
           .config("spark.io.encryption.enable", true)
           .config("spark.network.crypto.enabled", true)
-          .config("spark.driver.maxResultSize", s"${(runtimeMemorySize * 0.8).toLong}B")
+          .config("spark.driver.maxResultSize", s"${(runtimeMemory * 0.8).toLong}B")
 
         // add any spark overrides
         System.getenv.asScala
@@ -159,11 +160,12 @@ final class ArcInterpreter extends Interpreter {
             .field("config", sparkConf)
             .field("sparkVersion", spark.version)
             .field("arcVersion", ai.tripl.arc.util.Utils.getFrameworkVersion)
+            .field("arcJupyterVersion", ai.tripl.arc.jupyter.BuildInfo.version)
             .field("hadoopVersion", org.apache.hadoop.util.VersionInfo.getVersion)
             .field("scalaVersion", scala.util.Properties.versionNumberString)
             .field("javaVersion", System.getProperty("java.runtime.version"))
-            .field("runtimeMemorySize", s"${runtimeMemorySize}B")
-            .field("physicalMemorySize", s"${physicalMemorySize}B")
+            .field("runtimeMemory", s"${runtimeMemory}B")
+            .field("physicalMemory", s"${physicalMemory}B")
             .log()
 
           // only set default aws provider override if not provided
@@ -225,7 +227,7 @@ final class ArcInterpreter extends Interpreter {
                     |  "sql": \"\"\"${stmt}\"\"\",
                     |  "outputView": "${commandArgs.getOrElse("outputView", Common.randStr(32))}",
                     |  "persist": ${commandArgs.getOrElse("persist", "false")},
-                    |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "outputView", "numRows", "truncate", "persist", "monospace", "leftAlign", "datasetLabels", "datasetLabels", "streamingDuration").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
+                    |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "outputView", "numRows", "truncate", "persist", "monospace", "leftAlign", "datasetLabels", "streamingDuration").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
                     |}""".stripMargin
                 case x if x.startsWith("%log") =>
                   s"""{
@@ -350,7 +352,6 @@ final class ArcInterpreter extends Interpreter {
           case Some(outputHandler) => {
             interpreter match {
               case "arc" | "summary" | "cypher" => {
-                arcContext.userData += ("outputHandler" -> outputHandler)
                 val listener = new ProgressSparkListener(listenerElementHandle, jupyterLab)(outputHandler, logger)
                 listener.init()(outputHandler)
                 spark.sparkContext.addSparkListener(listener)
@@ -394,6 +395,10 @@ final class ArcInterpreter extends Interpreter {
                         ExecuteResult.Error("No stages found.")
                       }
                       case _ => {
+                        outputHandler match {
+                          case Some(oh) => arcCtx.userData += ("outputHandler" -> oh)
+                          case None =>
+                        }
                         ARC.run(pipeline)(spark, logger, arcCtx) match {
                           case Some(df) => {
                             val result = Common.renderResult(spark, outputHandler, pipeline.stages.lastOption, df, numRows, truncate, monospace, leftAlign, datasetLabels, streamingDuration, confStreamingFrequency)
@@ -563,7 +568,8 @@ final class ArcInterpreter extends Interpreter {
             val text = s"""
             |Arc Options:
             |master: ${confMaster}
-            |memory: ${runtimeMemorySize}B
+            |runtimeMemory: ${runtimeMemory}B
+            |physicalMemory: ${physicalMemory}B
             |streaming: ${confStreaming}
             |streamingDuration: ${confStreamingDuration}
             |
