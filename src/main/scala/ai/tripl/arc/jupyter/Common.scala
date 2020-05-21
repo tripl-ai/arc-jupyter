@@ -1,6 +1,7 @@
 package ai.tripl.arc.jupyter
 
 import java.security.SecureRandom
+import java.lang.management.ManagementFactory
 
 import util.control.Breaks._
 
@@ -108,12 +109,18 @@ object Common {
   }
 
   def getVersion()(implicit spark: SparkSession, arcContext: ARCContext): String = {
+    // the memory available to the container (i.e. the docker memory limit)
+    val physicalMemory = ManagementFactory.getOperatingSystemMXBean.asInstanceOf[com.sun.management.OperatingSystemMXBean].getTotalPhysicalMemorySize
+    // the JVM requested memory (-Xmx)
+    val runtimeMemory = Runtime.getRuntime.maxMemory
     s"""
     |spark: ${spark.version}
     |arc: ${ai.tripl.arc.ArcBuildInfo.BuildInfo.version}
     |arc-jupyter: ${ai.tripl.arc.jupyter.BuildInfo.version}
     |scala: ${scala.util.Properties.versionNumberString}
     |java: ${System.getProperty("java.runtime.version")}
+    |runtimeMemory: ${runtimeMemory}B
+    |physicalMemory: ${physicalMemory}B
     |dynamicConfigurationPlugins:
     |${arcContext.dynamicConfigurationPlugins.map(c => s" - ${c.getClass.getName}:${c.version}").sorted.mkString("\n")}
     |pipelinePlugins:
@@ -123,7 +130,7 @@ object Common {
     """.stripMargin
   }
 
-  def injectParameters(sql: String, params: Map[String, String])(implicit logger: ai.tripl.arc.util.log.logger.Logger): String = {
+  def injectParameters(sql: String, params: Map[String, String]): String = {
     // replace sqlParams parameters
     var stmt = params.foldLeft(sql) {
       case (stmt, (k,v)) => {
@@ -252,7 +259,7 @@ object Common {
     // add dataset name if exists
     val label = if (datasetLabels) {
       val (inputView, outputView) = stage match {
-        case Some(stage) => 
+        case Some(stage) =>
           val inputView = try {
             stage.getClass.getMethod("inputView").invoke(stage) match {
               case Some(stageName: String) => Option(stageName)
@@ -261,7 +268,7 @@ object Common {
             }
           } catch {
             case e: Exception => None
-          }         
+          }
           val outputView = try {
             stage.getClass.getMethod("outputView").invoke(stage) match {
               case Some(stageName: String) => Option(stageName)
