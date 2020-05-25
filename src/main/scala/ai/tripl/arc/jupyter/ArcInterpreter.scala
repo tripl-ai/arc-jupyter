@@ -33,8 +33,6 @@ import org.apache.spark.storage.StorageLevel
 
 import com.typesafe.config._
 
-import org.opencypher.morpheus.api.MorpheusSession
-
 import ai.tripl.arc.ARC
 import ai.tripl.arc.api.API.ARCContext
 import ai.tripl.arc.config.ArcPipeline
@@ -255,9 +253,6 @@ final class ArcInterpreter extends Interpreter {
               }
             )
           }
-          case x if (x.startsWith("%cypher")) => {
-            ("cypher", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
-          }
           case x if (x.startsWith("%configplugin")) => {
             ("configplugin", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
@@ -368,7 +363,7 @@ final class ArcInterpreter extends Interpreter {
         outputHandler match {
           case Some(outputHandler) => {
             interpreter match {
-              case "arc" | "summary" | "cypher" => {
+              case "arc" | "summary" => {
                 val listener = new ProgressSparkListener(listenerElementHandle, jupyterLab)(outputHandler, logger)
                 listener.init()(outputHandler)
                 spark.sparkContext.addSparkListener(listener)
@@ -432,22 +427,6 @@ final class ArcInterpreter extends Interpreter {
                 }
               }
             }
-          }
-          case "cypher" => {
-            // the morpheus session must be created by the GraphTransform stage
-            val morpheusSession = arcContext.userData.get("morpheusSession") match {
-              case Some(morpheusSession: MorpheusSession) => morpheusSession
-              case _ => throw new Exception(s"CypherTransform executes an existing graph created with GraphTransform but no session exists to execute CypherTransform against.")
-            }
-            val df = morpheusSession.cypher(SQLUtils.injectParameters(command, confCommandLineArgs.map { case (key, config) => (key, config.value) }, true)).records.table.df
-            commandArgs.get("outputView") match {
-              case Some(ov) => df.createOrReplaceTempView(ov)
-              case None =>
-            }
-            if (persist) df.persist(StorageLevel.MEMORY_AND_DISK_SER)
-            ExecuteResult.Success(
-              DisplayData.html(Common.renderHTML(df, None, numRows, truncate, monospace, leftAlign, datasetLabels))
-            )
           }
           case "configplugin" => {
             val config = ConfigFactory.parseString(s"""{"plugins": {"config": [${command}]}}""", ConfigParseOptions.defaults().setSyntax(ConfigSyntax.CONF))

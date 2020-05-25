@@ -14,8 +14,6 @@ object Dependencies {
 
   val arc = "ai.tripl" %% "arc" % "3.0.0" % "provided"
 
-  val graph = "ai.tripl" %% "arc-graph-pipeline-plugin" % "1.2.0" % "provided"
-  
   val etlDeps = Seq(
     sparkCore,
     sparkSql,
@@ -23,7 +21,6 @@ object Dependencies {
     sparkMl,
     kernel,
     caseApp,
-    arc,
-    graph
+    arc
   )
 }
