@@ -5,53 +5,32 @@ import almond.channels.zeromq.ZeromqThreads
 import almond.kernel.install.Install
 import almond.kernel.{Kernel, KernelThreads}
 import almond.logger.{Level, LoggerContext}
-import caseapp._
 
-object ArcKernel extends CaseApp[Options] {
+object ArcKernel {
 
-  def run(options: Options, args: RemainingArgs): Unit = {
+  def main(args: Array[String]): Unit = {
 
-    val logCtx = Level.fromString(options.log) match {
-      case Left(err) =>
-        Console.err.println(err)
-        sys.exit(1)
-      case Right(level) =>
-        LoggerContext.stderr(level)
+    // read command line arguments into a map
+    // must be in --key=value format
+    val clArgs = collection.mutable.Map[String, String]()
+    val (opts, _) = args.partition {
+      _.startsWith("--")
     }
-
-    val log = logCtx(getClass)
-
-    if (options.install)
-      Install.installOrError(
-        defaultId = "arc",
-        defaultDisplayName = "Arc",
-        language = "arc",
-        options = options.installOptions
-      ) match {
-        case Left(e) =>
-          log.debug("Cannot install kernel", e)
-          Console.err.println(s"Error: ${e.getMessage}")
-          sys.exit(1)
-        case Right(dir) =>
-          println(s"Installed arc kernel under $dir")
-          sys.exit(0)
+    opts.map { x =>
+      // regex split on only single = signs not at start or end of line
+      val pair = x.split("=(?!=)(?!$)", 2)
+      if (pair.length == 2) {
+        clArgs += (pair(0).split("-{1,2}")(1) -> pair(1))
       }
-
-    val connectionFile = options.connectionFile.getOrElse {
-      Console.err.println(
-        "No connection file passed, and installation not asked. Run with --install to install the kernel, " +
-          "or pass a connection file via --connection-file to run the kernel."
-      )
-      sys.exit(1)
     }
+    val commandLineArguments = clArgs.toMap
 
     val zeromqThreads = ZeromqThreads.create("arc-kernel")
     val kernelThreads = KernelThreads.create("arc-kernel")
     val interpreterEc = singleThreadedExecutionContext("arc-interpreter")
 
-    log.debug("Running kernel")
-    Kernel.create(new ArcInterpreter, interpreterEc, kernelThreads, logCtx)
-      .flatMap(_.runOnConnectionFile(connectionFile, "arc", zeromqThreads))
+    Kernel.create(new ArcInterpreter, interpreterEc, kernelThreads, LoggerContext.stderr(Level.Warning))
+      .flatMap(_.runOnConnectionFile(commandLineArguments.get("connection").get, "arc", zeromqThreads))
       .unsafeRunSync()
   }
 }

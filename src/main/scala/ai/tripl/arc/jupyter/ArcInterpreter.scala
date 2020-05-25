@@ -10,14 +10,14 @@ import java.util.ServiceLoader
 import java.util.UUID
 
 import scala.collection.JavaConverters._
-import scala.util.Try
+import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.duration.Duration
 import scala.util.Properties._
+import scala.util.Try
 import util.control.Breaks._
 
 import almond.interpreter.{Completion, ExecuteResult, Inspection, Interpreter}
 import almond.interpreter.api.{DisplayData, OutputHandler}
-import scala.concurrent.duration.Duration
-import scala.concurrent.{Await, ExecutionContext, Future}
 import almond.interpreter.input.InputManager
 import almond.protocol.KernelInfo
 
@@ -33,14 +33,14 @@ import org.apache.spark.storage.StorageLevel
 
 import com.typesafe.config._
 
-import ai.tripl.arc.ARC
 import ai.tripl.arc.api.API.ARCContext
+import ai.tripl.arc.ARC
 import ai.tripl.arc.config.ArcPipeline
 import ai.tripl.arc.plugins._
-import ai.tripl.arc.util.MetadataUtils
-import ai.tripl.arc.util.SQLUtils
 import ai.tripl.arc.util.log.LoggerFactory
+import ai.tripl.arc.util.MetadataUtils
 import ai.tripl.arc.util.SerializableConfiguration
+import ai.tripl.arc.util.SQLUtils
 
 
 case class ConfigValue (
