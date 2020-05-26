@@ -1,5 +1,9 @@
 # Change Log
 
+## 2.4.2
+
+- fix defect in setting `conf_spark_hadoop_*` variables.
+
 ## 2.4.1
 
 - consistently log memory availablility and assigned.
