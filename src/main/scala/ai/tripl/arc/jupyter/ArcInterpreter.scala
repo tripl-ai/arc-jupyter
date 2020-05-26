@@ -46,7 +46,7 @@ final class ArcInterpreter extends Interpreter {
 
   implicit var spark: SparkSession = _
 
-  val autenticateSecret = Common.randStr(64)
+  val authenticateSecret = Common.randStr(64)
 
   val secretPattern = """"(token|signature|accessKey|secret|secretAccessKey)":[\s]*".*"""".r
 
@@ -120,19 +120,19 @@ final class ArcInterpreter extends Interpreter {
           .config("spark.rdd.compress", true)
           .config("spark.sql.cbo.enabled", true)
           .config("spark.authenticate", true)
-          .config("spark.authenticate.secret", autenticateSecret)
+          .config("spark.authenticate.secret", authenticateSecret)
           .config("spark.io.encryption.enable", true)
           .config("spark.network.crypto.enabled", true)
           .config("spark.driver.maxResultSize", s"${(runtimeMemory * 0.8).toLong}B")
 
         // add any spark overrides
         System.getenv.asScala
-          .filter{ case (key, _) => key.startsWith("conf_spark") }
+          .filter { case (key, _) => key.startsWith("conf_spark") }
           // apply hadoop options after spark session creation
-          .filter{ case (key, _) => !key.startsWith("conf_spark_hadoop") }
+          .filter { case (key, _) => !key.startsWith("conf_spark_hadoop") }
           // you cannot override these settings for security
-          .filter{ case (key, _) => !Seq("conf_spark_authenticate", "conf_spark_authenticate_secret", "conf_spark_io_encryption_enable", "conf_spark_network_crypto_enabled").contains(key) }
-          .foldLeft(sessionBuilder: SparkSession.Builder){ case (sessionBuilder, (key: String, value: String)) => {
+          .filter { case (key, _) => !Seq("conf_spark_authenticate", "conf_spark_authenticate_secret", "conf_spark_io_encryption_enable", "conf_spark_network_crypto_enabled").contains(key) }
+          .foldLeft(sessionBuilder: SparkSession.Builder) { case (sessionBuilder, (key: String, value: String)) => {
             sessionBuilder.config(key.replaceFirst("conf_","").replaceAll("_", "."), value)
           }}
 
@@ -141,9 +141,9 @@ final class ArcInterpreter extends Interpreter {
 
         // add any hadoop overrides
         System.getenv.asScala
-          .filter{ case (key, _) => key.startsWith("conf_spark_hadoop") }
-          .foreach{ case (key: String, value: String) => {
-            spark.sparkContext.hadoopConfiguration.set(key.replaceFirst("conf_spark_hadoop","").replaceAll("_", "."), value)
+          .filter { case (key, _) => key.startsWith("conf_spark_hadoop") }
+          .foreach { case (key, value) => {
+            spark.sparkContext.hadoopConfiguration.set(key.replaceFirst("conf_spark_hadoop_","").replaceAll("_", "."), value)
           }}
 
         val loader = ai.tripl.arc.util.Utils.getContextOrSparkClassLoader
@@ -153,6 +153,7 @@ final class ArcInterpreter extends Interpreter {
         if (firstRun) {
           val sparkConf = new java.util.HashMap[String, String]()
           spark.sparkContext.getConf.getAll.filter{ case (k, _) => !Seq("spark.authenticate.secret").contains(k) }.foreach{ case (k, v) => sparkConf.put(k, v) }
+
           logger.info()
             .field("config", sparkConf)
             .field("sparkVersion", spark.version)
