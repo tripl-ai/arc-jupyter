@@ -146,7 +146,7 @@ final class ArcInterpreter extends Interpreter {
           .filter { case (key, _) => !key.startsWith("conf_spark_hadoop") }
           // you cannot override these settings for security
           .filter { case (key, _) => !Seq("conf_spark_authenticate", "conf_spark_authenticate_secret", "conf_spark_io_encryption_enable", "conf_spark_network_crypto_enabled").contains(key) }
-          .foldLeft(sessionBuilder: SparkSession.Builder){ case (sessionBuilder, (key: String, value: String)) => {
+          .foldLeft(sessionBuilder: SparkSession.Builder) { case (sessionBuilder, (key: String, value: String)) => {
             sessionBuilder.config(key.replaceFirst("conf_","").replaceAll("_", "."), value)
           }}
 
@@ -167,6 +167,7 @@ final class ArcInterpreter extends Interpreter {
         if (firstRun) {
           val sparkConf = new java.util.HashMap[String, String]()
           spark.sparkContext.getConf.getAll.filter{ case (k, _) => !Seq("spark.authenticate.secret").contains(k) }.foreach{ case (k, v) => sparkConf.put(k, v) }
+
           logger.info()
             .field("config", sparkConf)
             .field("sparkVersion", spark.version)
