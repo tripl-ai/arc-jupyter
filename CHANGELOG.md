@@ -1,5 +1,10 @@
 # Change Log
 
+## 2.5.0
+
+- add `%list` magic to display file information.
+- format date and timestamps as [ISO_8601](https://en.wikipedia.org/wiki/ISO_8601) for clarity.
+
 ## 2.4.2
 
 - fix defect in setting `conf_spark_hadoop_*` variables.
