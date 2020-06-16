@@ -91,6 +91,9 @@ object Common {
     |%conf
     |Set global Configuration Parameters which will apply to all cells.
     |
+    |%list
+    |Show a list of files in a target directory
+    |
     |%help
     |Display this help text.
     |
@@ -228,6 +231,8 @@ object Common {
         // replace commas (from format_number), replace any trailing zeros (but leave at least one character after the .)
         case DoubleType => regexp_replace(regexp_replace(regexp_replace(format_number(col(fieldName), 10),",",""),"(?<=.[0-9]{2})0+$",""),"^\\.","0.")
         case x: DecimalType => regexp_replace(format_number(col(fieldName), x.scale),",","")
+        case TimestampType => date_format(col(fieldName), "yyyy-MM-dd\'T\'HH:mm:ss\'Z\'")
+        case DateType => date_format(col(fieldName), "yyyy-MM-dd")
         case _ => col(fieldName).cast(StringType)
       }
     }

@@ -1,10 +1,13 @@
 package ai.tripl.arc.jupyter
 
-import java.util.UUID
+import java.lang.management.ManagementFactory
+import java.net.URI
+import java.security.SecureRandom
+import java.sql.Timestamp
+import java.time.Instant
 import java.util.Properties
 import java.util.ServiceLoader
-import java.security.SecureRandom
-import java.lang.management.ManagementFactory
+import java.util.UUID
 
 import scala.collection.JavaConverters._
 import scala.util.Try
@@ -19,12 +22,15 @@ import almond.interpreter.input.InputManager
 import almond.protocol.internal.ExtraCodecs._
 import almond.protocol.KernelInfo
 
+import org.apache.commons.io.FileUtils
 import org.apache.commons.lang3.time.DurationFormatUtils
-import org.apache.spark.sql._
+import org.apache.hadoop.fs.FileSystem
+import org.apache.hadoop.fs.Path
 import org.apache.log4j.{Level, Logger}
-import org.apache.spark.storage.StorageLevel
+import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
+import org.apache.spark.storage.StorageLevel
 
 import com.typesafe.config._
 
@@ -43,6 +49,14 @@ import ai.tripl.arc.util.SerializableConfiguration
 case class ConfigValue (
   secret: Boolean,
   value: String
+)
+
+case class FileDisplay(
+  path: String,
+  name: String,
+  modificationTime: Timestamp,
+  size: String,
+  bytes: Long
 )
 
 final class ArcInterpreter extends Interpreter {
@@ -110,7 +124,7 @@ final class ArcInterpreter extends Interpreter {
       // the JVM requested memory (-Xmx)
       val runtimeMemory = Runtime.getRuntime.maxMemory
       val executeResult = if (runtimeMemory > physicalMemory) {
-        return ExecuteResult.Error(s"Cannot execute as requested JVM memory (-Xmx${runtimeMemory}B) exceeds available system memory (${physicalMemory}B) limit.\nEither decrease the requested JVM memory or, if running in Docker, increase the Docker memory limit.")
+        return ExecuteResult.Error(s"Cannot execute as requested JVM memory (-Xmx${FileUtils.byteCountToDisplaySize(runtimeMemory)}B) exceeds available system memory (${FileUtils.byteCountToDisplaySize(physicalMemory)}B) limit.\nEither decrease the requested JVM memory or, if running in Docker, increase the Docker memory limit.")
       } else {
 
         val firstRun = SparkSession.getActiveSession.isEmpty
@@ -266,6 +280,9 @@ final class ArcInterpreter extends Interpreter {
           case x if (x.startsWith("%summary")) => {
             ("summary", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
+          case x if (x.startsWith("%list")) => {
+            ("list", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
+          }          
           case x if (x.startsWith("%env")) => {
             ("env", parseArgs(lines.mkString(" ")), "")
           }
@@ -286,6 +303,7 @@ final class ArcInterpreter extends Interpreter {
 
         val numRows = Try(commandArgs.get("numRows").get.toInt).getOrElse(confNumRows)
         val truncate = Try(commandArgs.get("truncate").get.toInt).getOrElse(confTruncate)
+        val streaming = Try(commandArgs.get("streaming").get.toBoolean).getOrElse(confStreaming)
         val streamingDuration = Try(commandArgs.get("streamingDuration").get.toInt).getOrElse(confStreamingDuration)
         val persist = Try(commandArgs.get("persist").get.toBoolean).getOrElse(false)
         val monospace = Try(commandArgs.get("monospace").get.toBoolean).getOrElse(confMonospace)
@@ -594,6 +612,28 @@ final class ArcInterpreter extends Interpreter {
               DisplayData.text(Common.getHelp)
             )
           }
+          case "list" => {
+            val uri = new URI(command.trim)
+            val fs = FileSystem.get(uri, spark.sparkContext.hadoopConfiguration)
+            val fileStatus = fs.globStatus(new Path(uri))
+            val df = fileStatus.map { file => 
+              FileDisplay(
+                file.getPath.getParent.toString,
+                file.getPath.getName,
+                Timestamp.from(Instant.ofEpochMilli(file.getModificationTime)),
+                if (!file.isDirectory) FileUtils.byteCountToDisplaySize(file.getLen) else "",
+                if (!file.isDirectory) file.getLen else 0
+              )
+            }.toSeq.toDF.orderBy(col("name"))
+            commandArgs.get("outputView") match {
+              case Some(ov) => df.createOrReplaceTempView(ov)
+              case None =>
+            }
+            if (persist) df.persist(StorageLevel.MEMORY_AND_DISK_SER)
+            ExecuteResult.Success(
+              DisplayData.html(Common.renderHTML(df, None, numRows, truncate, monospace, leftAlign, datasetLabels))
+            )
+          }          
         }
       }
 
