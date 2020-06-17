@@ -60,10 +60,6 @@ object Common {
     |Run an inline SQLValidate stage. e.g.:
     |%sqlvalidate name="ensure no errors exist after data typing" environments=production,test sqlParams=input_table=${ETL_CONF_TABLE}
     |
-    |%cypher
-    |Run a Cypher graph query. Scala 2.12 only.
-    |Supported configuration parameters: numRows, truncate, outputView, persist, monospace
-    |
     |%schema [view]
     |Display a JSON formatted schema for the input view
     |
@@ -231,7 +227,8 @@ object Common {
         // replace commas (from format_number), replace any trailing zeros (but leave at least one character after the .)
         case DoubleType => regexp_replace(regexp_replace(regexp_replace(format_number(col(fieldName), 10),",",""),"(?<=.[0-9]{2})0+$",""),"^\\.","0.")
         case x: DecimalType => regexp_replace(format_number(col(fieldName), x.scale),",","")
-        case TimestampType => date_format(col(fieldName), "yyyy-MM-dd\'T\'HH:mm:ss\'Z\'")
+        // will convert to stringtype with UTC ZoneID
+        case TimestampType => concat(col(fieldName).cast(StringType),lit("Z"))
         case DateType => date_format(col(fieldName), "yyyy-MM-dd")
         case _ => col(fieldName).cast(StringType)
       }

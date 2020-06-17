@@ -1,9 +1,16 @@
 # Change Log
 
+## 3.0.0
+
+- update to Arc 3.0.0
+- format timestamp as [RFC3339](https://tools.ietf.org/html/rfc3339) with nano where appropriate (omitting 'T' for [readability](https://tools.ietf.org/html/rfc3339#section-5.6)).
+
 ## 2.5.0
 
 - add `%list` magic to display file information.
 - format date and timestamps as [ISO_8601](https://en.wikipedia.org/wiki/ISO_8601) for clarity.
+
+**NOTE** This is the last release supporting `Scala 2.11` given the release of `Spark 3.0` which only supports `Scala 2.12`.
 
 ## 2.4.2
 
