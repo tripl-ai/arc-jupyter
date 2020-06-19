@@ -1,5 +1,9 @@
 # Change Log
 
+## 3.0.1
+
+- add configurations from `/opt/spark/conf/spark-defaults.conf` to simplify keeping `arc` and `arc-jupter` options in sync.
+
 ## 3.0.0
 
 - update to Arc 3.0.0

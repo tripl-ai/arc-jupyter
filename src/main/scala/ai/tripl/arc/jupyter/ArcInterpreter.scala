@@ -131,13 +131,15 @@ final class ArcInterpreter extends Interpreter {
           .master(confMaster)
           .appName("arc-jupyter")
           .config("spark.sql.warehouse.dir", "/tmp/spark-warehouse")
-          .config("spark.rdd.compress", true)
-          .config("spark.sql.cbo.enabled", true)
-          .config("spark.authenticate", true)
           .config("spark.authenticate.secret", authenticateSecret)
-          .config("spark.io.encryption.enable", true)
-          .config("spark.network.crypto.enabled", true)
           .config("spark.driver.maxResultSize", s"${(runtimeMemory * 0.8).toLong}B")
+
+        // read the defaults from spark-defaults.conf
+        Common.getPropertiesFromFile("/opt/spark/conf/spark-defaults.conf")
+          .filter { case (key, _) => key.startsWith("spark.") }
+          .foreach { case (key, value) => {
+            sessionBuilder.config(key, value)
+          }}
 
         // add any spark overrides
         System.getenv.asScala
@@ -146,7 +148,7 @@ final class ArcInterpreter extends Interpreter {
           .filter { case (key, _) => !key.startsWith("conf_spark_hadoop") }
           // you cannot override these settings for security
           .filter { case (key, _) => !Seq("conf_spark_authenticate", "conf_spark_authenticate_secret", "conf_spark_io_encryption_enable", "conf_spark_network_crypto_enabled").contains(key) }
-          .foldLeft(sessionBuilder: SparkSession.Builder) { case (sessionBuilder, (key: String, value: String)) => {
+          .foreach{ case (key: String, value: String) => {
             sessionBuilder.config(key.replaceFirst("conf_","").replaceAll("_", "."), value)
           }}
 

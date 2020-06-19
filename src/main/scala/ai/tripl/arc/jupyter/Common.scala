@@ -2,14 +2,19 @@ package ai.tripl.arc.jupyter
 
 import java.security.SecureRandom
 import java.lang.management.ManagementFactory
+import java.io._
+import java.util.Properties
+import java.nio.charset.StandardCharsets
 
 import util.control.Breaks._
+import scala.collection.JavaConverters._
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql._
 import org.apache.spark.sql.expressions.Window
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
+
 import almond.interpreter.api.{DisplayData, OutputHandler}
 import almond.interpreter.{Completion, ExecuteResult, Inspection, Interpreter}
 
@@ -299,5 +304,62 @@ object Common {
   val size = alpha.size
   val secureRandom = new SecureRandom
   def randStr(n:Int) = (1 to n).map(x => alpha(secureRandom.nextInt.abs % size)).mkString
+
+
+
+
+
+
+
+
+
+
+  // This function comes from the Apahce Spark org.apache.spark.util.Utils private class
+  /** Load properties present in the given file. */
+  def getPropertiesFromFile(filename: String): Map[String, String] = {
+    val file = new File(filename)
+    require(file.exists(), s"Properties file $file does not exist")
+    require(file.isFile(), s"Properties file $file is not a normal file")
+
+    val inReader = new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8)
+    try {
+      val properties = new Properties()
+      properties.load(inReader)
+      properties.stringPropertyNames().asScala
+        .map { k => (k, trimExceptCRLF(properties.getProperty(k))) }
+        .toMap
+
+    } catch {
+      case e: IOException =>
+        throw new Exception(s"Failed when loading Spark properties from $filename", e)
+    } finally {
+      inReader.close()
+    }
+  }
+
+  // This function comes from the Apahce Spark org.apache.spark.util.Utils private class
+  /**
+   * Implements the same logic as JDK `java.lang.String#trim` by removing leading and trailing
+   * non-printable characters less or equal to '\u0020' (SPACE) but preserves natural line
+   * delimiters according to java.util.Properties load method. The natural line delimiters are
+   * removed by JDK during load. Therefore any remaining ones have been specifically provided and
+   * escaped by the user, and must not be ignored
+   *
+   * @param str
+   * @return the trimmed value of str
+   */  
+  def trimExceptCRLF(str: String): String = {
+    val nonSpaceOrNaturalLineDelimiter: Char => Boolean = { ch =>
+      ch > ' ' || ch == '\r' || ch == '\n'
+    }
+
+    val firstPos = str.indexWhere(nonSpaceOrNaturalLineDelimiter)
+    val lastPos = str.lastIndexWhere(nonSpaceOrNaturalLineDelimiter)
+    if (firstPos >= 0 && lastPos >= 0) {
+      str.substring(firstPos, lastPos + 1)
+    } else {
+      ""
+    }
+  }  
 
 }
