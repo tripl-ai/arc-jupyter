@@ -59,6 +59,7 @@ case class FileDisplay(
 final class ArcInterpreter extends Interpreter {
 
   implicit var spark: SparkSession = _
+  implicit var arcContext: ARCContext = _
 
   val authenticateSecret = Common.randStr(64)
 
@@ -68,15 +69,13 @@ final class ArcInterpreter extends Interpreter {
   var confMaster = envOrNone("CONF_MASTER").getOrElse("local[*]")
   var confNumRows = Try(envOrNone("CONF_NUM_ROWS").get.toInt).getOrElse(20)
   var confTruncate = Try(envOrNone("CONF_TRUNCATE").get.toInt).getOrElse(50)
-  var confStreaming = false
   var confStreamingDuration = Try(envOrNone("CONF_STREAMING_DURATION").get.toInt).getOrElse(10)
   var confStreamingFrequency = Try(envOrNone("CONF_STREAMING_FREQUENCY").get.toInt).getOrElse(1000)
   var confMonospace = Try(envOrNone("CONF_DISPLAY_MONOSPACE").get.toBoolean).getOrElse(false)
   var confLeftAlign = Try(envOrNone("CONF_DISPLAY_LEFT_ALIGN").get.toBoolean).getOrElse(false)
   var confDatasetLabels = Try(envOrNone("CONF_DISPLAY_DATASET_LABELS").get.toBoolean).getOrElse(false)
+  var confStreaming = false
   var udfsRegistered = false
-
-  var isJupyterLab: Option[Boolean] = None
 
   // resolution is slow so dont keep repeating
   var memoizedPipelineStagePlugins: Option[List[ai.tripl.arc.plugins.PipelineStagePlugin]] = None
@@ -94,14 +93,26 @@ final class ArcInterpreter extends Interpreter {
       KernelInfo.LanguageInfo(
         "arc",
         ai.tripl.arc.jupyter.BuildInfo.version,
-        "text/arc",
-        "arc",
-        "text" // ???
+        "javascript",
+        ".json",
+        "arcexport",
+        None,
+        Some("javascript")
       ),
-      s"""Arc kernel Java ${sys.props.getOrElse("java.version", "[unknown]")}""".stripMargin
+      s"""arc-jupyter ${ai.tripl.arc.jupyter.BuildInfo.version} arc ${ai.tripl.arc.util.Utils.getFrameworkVersion}"""".stripMargin
     )
 
   @volatile private var count = 0
+
+  override def complete(code: String, pos: Int): Completion = {
+    val spaceIndex = code.indexOf(" ")
+    if (spaceIndex == -1 || (pos < spaceIndex)){
+      val (completions, completionsMeta) = Common.getCompletions()
+      Completion(0, code.length, completions, completionsMeta)
+    } else {
+      Completion.empty(pos)
+    }
+  }
 
   def execute(
     code: String,
@@ -123,7 +134,6 @@ final class ArcInterpreter extends Interpreter {
       val executeResult = if (runtimeMemory > physicalMemory) {
         return ExecuteResult.Error(s"Cannot execute as requested JVM memory (-Xmx${FileUtils.byteCountToDisplaySize(runtimeMemory)}B) exceeds available system memory (${FileUtils.byteCountToDisplaySize(physicalMemory)}B) limit.\nEither decrease the requested JVM memory or, if running in Docker, increase the Docker memory limit.")
       } else {
-
         val firstRun = SparkSession.getActiveSession.isEmpty
 
         val sessionBuilder = SparkSession
@@ -190,14 +200,6 @@ final class ArcInterpreter extends Interpreter {
 
         import session.implicits._
 
-        // detect jupyterlab
-        val jupyterLab = isJupyterLab.getOrElse(
-          scala.util.Properties.envOrNone("JUPYTER_ENABLE_LAB") match {
-            case Some(j) if (j == "yes") => true
-            case None => false
-          }
-        )
-
         // parse input
         val lines = code.trim.split("\n")
         val (interpreter, commandArgs, command) = lines(0) match {
@@ -206,9 +208,10 @@ final class ArcInterpreter extends Interpreter {
           }
           case x if (x.startsWith("%sql") || x.startsWith("%log")) => {
             val commandArgs = parseArgs(lines(0))
-            val name = commandArgs.get("name") match {
-              case Some(name) => name
-              case None => ""
+            var name = commandArgs.get("name") match {
+              case Some(name) => 
+                s"""${if (!name.startsWith("\"")) "\"" else ""}$name${if (!name.endsWith("\"")) "\"" else ""}"""
+              case None => "\"\""
             }
             val description = commandArgs.get("description") match {
               case Some(description) => description
@@ -226,7 +229,7 @@ final class ArcInterpreter extends Interpreter {
                 case x if x.startsWith("%sqlvalidate") =>
                   s"""{
                     |  "type": "SQLValidate",
-                    |  "name": "${name}",
+                    |  "name": ${name},
                     |  "description": "${description}",
                     |  "environments": [],
                     |  "sql": \"\"\"${stmt}\"\"\",
@@ -235,7 +238,7 @@ final class ArcInterpreter extends Interpreter {
                 case x if x.startsWith("%sql") =>
                   s"""{
                     |  "type": "SQLTransform",
-                    |  "name": "${name}",
+                    |  "name": ${name},
                     |  "description": "${description}",
                     |  "environments": [],
                     |  "sql": \"\"\"${stmt}\"\"\",
@@ -246,7 +249,7 @@ final class ArcInterpreter extends Interpreter {
                 case x if x.startsWith("%log") =>
                   s"""{
                     |  "type": "LogExecute",
-                    |  "name": "${name}",
+                    |  "name": ${name},
                     |  "description": "${description}",
                     |  "environments": [],
                     |  "sql": \"\"\"${stmt}\"\"\",
@@ -337,7 +340,7 @@ final class ArcInterpreter extends Interpreter {
           }
         }
 
-        implicit val arcContext = ARCContext(
+        arcContext = ARCContext(
           jobId=None,
           jobName=None,
           environment=None,
@@ -367,7 +370,7 @@ final class ArcInterpreter extends Interpreter {
           case Some(outputHandler) => {
             interpreter match {
               case "arc" | "summary" => {
-                val listener = new ProgressSparkListener(listenerElementHandle, jupyterLab)(outputHandler, logger)
+                val listener = new ProgressSparkListener(listenerElementHandle)(outputHandler, logger)
                 listener.init()(outputHandler)
                 spark.sparkContext.addSparkListener(listener)
                 executionListener = Option(listener)

@@ -14,12 +14,18 @@ import org.apache.spark.sql._
 import org.apache.spark.sql.expressions.Window
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
+import org.apache.spark.sql.execution.datasources.LogicalRelation
+import org.apache.spark.sql.catalyst.catalog.{CatalogTable, HiveTableRelation}
 
 import almond.interpreter.api.{DisplayData, OutputHandler}
 import almond.interpreter.{Completion, ExecuteResult, Inspection, Interpreter}
+import almond.protocol.RawJson
 
 import ai.tripl.arc.api.API
 import ai.tripl.arc.api.API._
+
+import com.fasterxml.jackson.databind._
+import com.fasterxml.jackson.databind.node._
 
 object Common {
 
@@ -305,10 +311,120 @@ object Common {
   val secureRandom = new SecureRandom
   def randStr(n:Int) = (1 to n).map(x => alpha(secureRandom.nextInt.abs % size)).mkString
 
+  case class Completion (
+    text: String,
+    textType: String,
+    replaceText: String,
+    language: String
+  )
 
+  // todo: these should come from traits in arc
+  def getCompletions()(implicit spark: SparkSession, arcContext: ARCContext): (Seq[String], RawJson) = {
+    val completions = Seq(
+      Completion(
+        "SQLTransform",
+        "transform",
+        """{
+        |  "type": "SQLTransform",
+        |  "name": "SQLTransform",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputURI": "hdfs://*.sql",
+        |  "outputView": "outputView"
+        |}""".stripMargin,
+        "javascript"
+      ),
+      Completion(
+        "AvroExtract",
+        "extract",
+        """{
+        |  "type": "AvroExtract",
+        |  "name": "AvroExtract",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputURI": "hdfs://*.avro",
+        |  "outputView": "outputView"
+        |}""".stripMargin,
+        "javascript"
+      ),    
+      Completion(
+        "BytesExtract",
+        "extract",
+        """{
+        |  "type": "BytesExtract",
+        |  "name": "BytesExtract",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputURI": "hdfs://*.jpg",
+        |  "outputView": "outputView"
+        |}""".stripMargin,
+        "javascript"
+      ),
+      Completion(
+        "%sqlvalidate",
+        "execute",
+        """%sqlvalidate name="sqlvalidate environments=production,test"
+        |SELECT
+        |  TRUE AS valid
+        |  ,TO_JSON(
+        |    NAMED_STRUCT(
+        |      'key', 'value'
+        |    )
+        |  ) AS message""".stripMargin,
+        "sql"
+      ),   
+      Completion(
+        "%sql",
+        "transform",
+        arcContext.userData.get("lastView").flatMap { lastView => 
+          try {
+            lastView.asInstanceOf[Option[String]]
+          } catch {
+            case e: Exception => None
+          }
+        } match {
+          case None => {         
+            """%sql name="sqlvalidate" outputView=outputView environments=production,test
+            |SELECT
+            |  *
+            |FROM inputView""".stripMargin
+          }
+          case Some(lastView) => {
+              val df = spark.table(lastView)
+              df.columns
+              s"""%sql name="sqlvalidate" outputView=outputView environments=production,test
+              |SELECT
+              |${df.columns.map { col => if (col.indexOf(" ") == -1) col else s"`$col`" }.mkString("  ", "\n  ,", "")}
+              |FROM ${lastView}""".stripMargin                          
+            }
+          }
+        ,"sql"
+      ),         
+    )
 
+    val objectMapper = new ObjectMapper()
+    val jsonNodeFactory = new JsonNodeFactory(true)
+    val node = jsonNodeFactory.objectNode
+    val jupyterTypesArray = node.putArray("_jupyter_types_experimental")
 
+    completions.foreach { completion => 
+      val completionNode = jsonNodeFactory.objectNode
+      completionNode.set("text", jsonNodeFactory.textNode(completion.text))
+      completionNode.set("type", jsonNodeFactory.textNode(completion.textType))
+      completionNode.set("replaceText", jsonNodeFactory.textNode(completion.replaceText))
+      completionNode.set("language", jsonNodeFactory.textNode(completion.language))
+      completionNode.set("sortBy", jsonNodeFactory.textNode(s"${completion.textType}:${completion.text}"))
+      jupyterTypesArray.add(completionNode)
+    }
 
+    (completions.map(_.text), RawJson(objectMapper.writeValueAsString(node).getBytes(StandardCharsets.UTF_8)))
+  }
 
 
 

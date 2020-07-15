@@ -15,9 +15,9 @@ import scala.concurrent.duration.FiniteDuration
 import scala.collection.JavaConverters._
 import scala.util.Try
 
-final class ProgressSparkListener(executionId: String, isJupyterLab: Boolean)(implicit outputHandler: OutputHandler, logger: Logger) extends SparkListener {
+final class ProgressSparkListener(progressBarId: String)(implicit outputHandler: OutputHandler, logger: Logger) extends SparkListener {
 
-  val rateLimit = Duration(200, MILLISECONDS).toMillis
+  val rateLimit = Duration(150, MILLISECONDS).toMillis
   var isRunning = new AtomicBoolean(false)
   var lastStopTime = Long.MinValue
 
@@ -58,10 +58,8 @@ final class ProgressSparkListener(executionId: String, isJupyterLab: Boolean)(im
 
   def init()(implicit outputHandler: OutputHandler): Unit = {
     outputHandler.html(
-      s"""<div class="progress arc-background">
-        |  <div class="progress-bar arc-complete" style="width: 0%;">0 / 0</div>
-        |</div>""".stripMargin,
-      executionId
+      s"""<div class="progress">0/0</div>""",
+      progressBarId
     )
   }
 
@@ -89,49 +87,32 @@ final class ProgressSparkListener(executionId: String, isJupyterLab: Boolean)(im
       s"${doneTasksSnapshot}/${numTasksSnapshot} (${runningTasks} running)"
     }
 
-    val statusClass = if (error) {
-      "error"
-    } else {
-      ""
-    }
-
-    // jupyterlab has a different format
-    if (isJupyterLab) {
-      if (removeListener) {
-        if (error) {
-          outputHandler.updateHtml(
-            s"""<div class="progress">
-                |  <div class="progress-bar-danger" style="width: ${if (!donePct.isNaN) donePct else 100}%;">${statusText}</div>
-                |</div>
-                |""".stripMargin,
-            executionId
-          )
-        } else {
-          outputHandler.updateHtml(
-            s"""<div class="progress">
-                |  <div class="progress-bar-success" style="width: ${if (!donePct.isNaN) donePct else 100}%;">${statusText}</div>
-                |</div>
-                |""".stripMargin,
-            executionId
-          )
-        }
+    if (removeListener) {
+      if (error) {
+        outputHandler.updateHtml(
+          s"""<div class="progress">
+              |  <div class="progress-bar-danger" style="width: 100%;">${statusText}</div>
+              |</div>
+              |""".stripMargin,
+          progressBarId
+        )
       } else {
         outputHandler.updateHtml(
           s"""<div class="progress">
-              |  <div class="progress-bar-info" style="width: ${if (!donePct.isNaN) donePct else 100}%;">${statusText}</div>
+              |  <div class="progress-bar-success" style="width: 100%;">${statusText}</div>
               |</div>
               |""".stripMargin,
-          executionId
+          progressBarId
         )
       }
     } else {
       outputHandler.updateHtml(
-        s"""<div class="progress arc-background">
-            |  <div class="progress-bar arc-complete ${statusClass}" style="width: ${if (!donePct.isNaN) donePct else 100}%;">${statusText}</div>
-            |  <div class="progress-bar arc-running ${statusClass}" style="width: $runningPct%;"></div>
+        s"""<div class="progress">
+            |  <div class="progress-bar-success"" style="width: ${if (!donePct.isNaN) donePct else 100}%;">${statusText}</div>
+            |  <div class="progress-bar-info" style="width: ${if (!runningPct.isNaN) runningPct else 0}%;"></div>
             |</div>
             |""".stripMargin,
-        executionId
+        progressBarId
       )
     }
   }
