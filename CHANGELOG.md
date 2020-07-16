@@ -2,6 +2,7 @@
 
 ## 3.1.0
 
+- intialise Spark on Kernel startup to slightly increase user experience.
 - add `completer` functionality to allow code completions in JupyterLab.
 
 ## 3.0.1

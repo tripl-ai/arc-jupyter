@@ -61,6 +61,14 @@ final class ArcInterpreter extends Interpreter {
   implicit var spark: SparkSession = _
   implicit var arcContext: ARCContext = _
 
+  Logger.getLogger("org").setLevel(Level.ERROR)
+  Logger.getLogger("breeze").setLevel(Level.ERROR)
+
+  // the memory available to the container (i.e. the docker memory limit)
+  val physicalMemory = ManagementFactory.getOperatingSystemMXBean.asInstanceOf[com.sun.management.OperatingSystemMXBean].getTotalPhysicalMemorySize
+  // the JVM requested memory (-Xmx)
+  val runtimeMemory = Runtime.getRuntime.maxMemory
+
   val authenticateSecret = Common.randStr(64)
 
   val secretPattern = """"(token|signature|accessKey|secret|secretAccessKey)":[\s]*".*"""".r
@@ -104,6 +112,10 @@ final class ArcInterpreter extends Interpreter {
 
   @volatile private var count = 0
 
+  override def init(): Unit = {
+    startSession()
+  }
+
   override def complete(code: String, pos: Int): Completion = {
     val spaceIndex = code.indexOf(" ")
     if (spaceIndex == -1 || (pos < spaceIndex)){
@@ -112,6 +124,73 @@ final class ArcInterpreter extends Interpreter {
     } else {
       Completion.empty(pos)
     }
+  }
+
+  def startSession(): SparkSession = {
+    val emptySession = SparkSession.getActiveSession.isEmpty
+
+    if (emptySession) {
+      val sessionBuilder = SparkSession
+        .builder()
+        .master(confMaster)
+        .appName("arc-jupyter")
+        .config("spark.sql.warehouse.dir", "/tmp/spark-warehouse")
+        .config("spark.authenticate.secret", authenticateSecret)
+        .config("spark.driver.maxResultSize", s"${(runtimeMemory * 0.8).toLong}B")
+
+      // read the defaults from spark-defaults.conf
+      Common.getPropertiesFromFile("/opt/spark/conf/spark-defaults.conf")
+        .filter { case (key, _) => key.startsWith("spark.") }
+        .foreach { case (key, value) => {
+          sessionBuilder.config(key, value)
+        }}
+
+      // add any spark overrides
+      System.getenv.asScala
+        .filter { case (key, _) => key.startsWith("conf_spark") }
+        // apply hadoop options after spark session creation
+        .filter { case (key, _) => !key.startsWith("conf_spark_hadoop") }
+        // you cannot override these settings for security
+        .filter { case (key, _) => !Seq("conf_spark_authenticate", "conf_spark_authenticate_secret", "conf_spark_io_encryption_enable", "conf_spark_network_crypto_enabled").contains(key) }
+        .foreach{ case (key: String, value: String) => {
+          sessionBuilder.config(key.replaceFirst("conf_","").replaceAll("_", "."), value)
+        }}
+
+      val session = sessionBuilder.getOrCreate()
+      spark = session
+
+      // add any hadoop overrides
+      System.getenv.asScala
+        .filter { case (key, _) => key.startsWith("conf_spark_hadoop") }
+        .foreach { case (key, value) => {
+          spark.sparkContext.hadoopConfiguration.set(key.replaceFirst("conf_spark_hadoop_","").replaceAll("_", "."), value)
+        }}
+
+      val loader = ai.tripl.arc.util.Utils.getContextOrSparkClassLoader
+      implicit val logger = LoggerFactory.getLogger("arc-jupyter")
+
+      val sparkConf = new java.util.HashMap[String, String]()
+      spark.sparkContext.getConf.getAll.filter{ case (k, _) => !Seq("spark.authenticate.secret").contains(k) }.foreach{ case (k, v) => sparkConf.put(k, v) }
+
+      logger.info()
+        .field("config", sparkConf)
+        .field("sparkVersion", spark.version)
+        .field("arcVersion", ai.tripl.arc.util.Utils.getFrameworkVersion)
+        .field("arcJupyterVersion", ai.tripl.arc.jupyter.BuildInfo.version)
+        .field("hadoopVersion", org.apache.hadoop.util.VersionInfo.getVersion)
+        .field("scalaVersion", scala.util.Properties.versionNumberString)
+        .field("javaVersion", System.getProperty("java.runtime.version"))
+        .field("runtimeMemory", s"${runtimeMemory}B")
+        .field("physicalMemory", s"${physicalMemory}B")
+        .log()
+
+      // only set default aws provider override if not provided
+      if (Option(spark.sparkContext.hadoopConfiguration.get("fs.s3a.aws.credentials.provider")).isEmpty) {
+        spark.sparkContext.hadoopConfiguration.set("fs.s3a.aws.credentials.provider", ai.tripl.arc.util.CloudUtils.defaultAWSProvidersOverride)
+      }
+    }
+
+    SparkSession.getActiveSession.get
   }
 
   def execute(
@@ -124,81 +203,17 @@ final class ArcInterpreter extends Interpreter {
     var executionListener: Option[ProgressSparkListener] = None
 
     try {
-      Logger.getLogger("org").setLevel(Level.ERROR)
-      Logger.getLogger("breeze").setLevel(Level.ERROR)
-
-      // the memory available to the container (i.e. the docker memory limit)
-      val physicalMemory = ManagementFactory.getOperatingSystemMXBean.asInstanceOf[com.sun.management.OperatingSystemMXBean].getTotalPhysicalMemorySize
-      // the JVM requested memory (-Xmx)
-      val runtimeMemory = Runtime.getRuntime.maxMemory
       val executeResult = if (runtimeMemory > physicalMemory) {
         return ExecuteResult.Error(s"Cannot execute as requested JVM memory (-Xmx${FileUtils.byteCountToDisplaySize(runtimeMemory)}B) exceeds available system memory (${FileUtils.byteCountToDisplaySize(physicalMemory)}B) limit.\nEither decrease the requested JVM memory or, if running in Docker, increase the Docker memory limit.")
       } else {
-        val firstRun = SparkSession.getActiveSession.isEmpty
-
-        val sessionBuilder = SparkSession
-          .builder()
-          .master(confMaster)
-          .appName("arc-jupyter")
-          .config("spark.sql.warehouse.dir", "/tmp/spark-warehouse")
-          .config("spark.authenticate.secret", authenticateSecret)
-          .config("spark.driver.maxResultSize", s"${(runtimeMemory * 0.8).toLong}B")
-
-        // read the defaults from spark-defaults.conf
-        Common.getPropertiesFromFile("/opt/spark/conf/spark-defaults.conf")
-          .filter { case (key, _) => key.startsWith("spark.") }
-          .foreach { case (key, value) => {
-            sessionBuilder.config(key, value)
-          }}
-
-        // add any spark overrides
-        System.getenv.asScala
-          .filter { case (key, _) => key.startsWith("conf_spark") }
-          // apply hadoop options after spark session creation
-          .filter { case (key, _) => !key.startsWith("conf_spark_hadoop") }
-          // you cannot override these settings for security
-          .filter { case (key, _) => !Seq("conf_spark_authenticate", "conf_spark_authenticate_secret", "conf_spark_io_encryption_enable", "conf_spark_network_crypto_enabled").contains(key) }
-          .foreach{ case (key: String, value: String) => {
-            sessionBuilder.config(key.replaceFirst("conf_","").replaceAll("_", "."), value)
-          }}
-
-        val session = sessionBuilder.getOrCreate()
-        spark = session
-
-        // add any hadoop overrides
-        System.getenv.asScala
-          .filter { case (key, _) => key.startsWith("conf_spark_hadoop") }
-          .foreach { case (key, value) => {
-            spark.sparkContext.hadoopConfiguration.set(key.replaceFirst("conf_spark_hadoop_","").replaceAll("_", "."), value)
-          }}
-
-        val loader = ai.tripl.arc.util.Utils.getContextOrSparkClassLoader
 
         implicit val logger = LoggerFactory.getLogger("arc-jupyter")
-
-        if (firstRun) {
-          val sparkConf = new java.util.HashMap[String, String]()
-          spark.sparkContext.getConf.getAll.filter{ case (k, _) => !Seq("spark.authenticate.secret").contains(k) }.foreach{ case (k, v) => sparkConf.put(k, v) }
-
-          logger.info()
-            .field("config", sparkConf)
-            .field("sparkVersion", spark.version)
-            .field("arcVersion", ai.tripl.arc.util.Utils.getFrameworkVersion)
-            .field("arcJupyterVersion", ai.tripl.arc.jupyter.BuildInfo.version)
-            .field("hadoopVersion", org.apache.hadoop.util.VersionInfo.getVersion)
-            .field("scalaVersion", scala.util.Properties.versionNumberString)
-            .field("javaVersion", System.getProperty("java.runtime.version"))
-            .field("runtimeMemory", s"${runtimeMemory}B")
-            .field("physicalMemory", s"${physicalMemory}B")
-            .log()
-
-          // only set default aws provider override if not provided
-          if (Option(spark.sparkContext.hadoopConfiguration.get("fs.s3a.aws.credentials.provider")).isEmpty) {
-            spark.sparkContext.hadoopConfiguration.set("fs.s3a.aws.credentials.provider", ai.tripl.arc.util.CloudUtils.defaultAWSProvidersOverride)
-          }
-        }
-
+        
+        // if session config changed and session stopped
+        val session = startSession()
         import session.implicits._
+
+        val loader = ai.tripl.arc.util.Utils.getContextOrSparkClassLoader
 
         // parse input
         val lines = code.trim.split("\n")
