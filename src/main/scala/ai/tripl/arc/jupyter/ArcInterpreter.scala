@@ -188,6 +188,9 @@ final class ArcInterpreter extends Interpreter {
       if (Option(spark.sparkContext.hadoopConfiguration.get("fs.s3a.aws.credentials.provider")).isEmpty) {
         spark.sparkContext.hadoopConfiguration.set("fs.s3a.aws.credentials.provider", ai.tripl.arc.util.CloudUtils.defaultAWSProvidersOverride)
       }
+
+      // start the sqlcontext
+      spark.sql("""SELECT TRUE""")
     }
 
     SparkSession.getActiveSession.get
@@ -205,8 +208,9 @@ final class ArcInterpreter extends Interpreter {
     try {
       val executeResult = if (runtimeMemory > physicalMemory) {
         return ExecuteResult.Error(s"Cannot execute as requested JVM memory (-Xmx${FileUtils.byteCountToDisplaySize(runtimeMemory)}B) exceeds available system memory (${FileUtils.byteCountToDisplaySize(physicalMemory)}B) limit.\nEither decrease the requested JVM memory or, if running in Docker, increase the Docker memory limit.")
+      } else if (spark == null) {
+        return ExecuteResult.Error(s"SparkSession has not been initialised. Please restart Kernel or wait for startup completion.")
       } else {
-
         implicit val logger = LoggerFactory.getLogger("arc-jupyter")
         
         // if session config changed and session stopped
