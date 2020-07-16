@@ -14,12 +14,18 @@ import org.apache.spark.sql._
 import org.apache.spark.sql.expressions.Window
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
+import org.apache.spark.sql.execution.datasources.LogicalRelation
+import org.apache.spark.sql.catalyst.catalog.{CatalogTable, HiveTableRelation}
 
 import almond.interpreter.api.{DisplayData, OutputHandler}
 import almond.interpreter.{Completion, ExecuteResult, Inspection, Interpreter}
+import almond.protocol.RawJson
 
 import ai.tripl.arc.api.API
 import ai.tripl.arc.api.API._
+
+import com.fasterxml.jackson.databind._
+import com.fasterxml.jackson.databind.node._
 
 object Common {
 
@@ -305,14 +311,900 @@ object Common {
   val secureRandom = new SecureRandom
   def randStr(n:Int) = (1 to n).map(x => alpha(secureRandom.nextInt.abs % size)).mkString
 
+  case class Completion (
+    text: String,
+    textType: String,
+    replaceText: String,
+    language: String,
+    documentation: String
+  )
 
+  // todo: these should come from traits in arc
+  def getCompletions()(implicit spark: SparkSession, arcContext: ARCContext): (Seq[String], RawJson) = {
+    val completions = Seq(
+      Completion(
+        "AvroExtract",
+        "extract",
+        """{
+        |  "type": "AvroExtract",
+        |  "name": "AvroExtract",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputURI": "hdfs://*.avro",
+        |  "outputView": "outputView"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/extract/#avroextract"
+      ),
+      Completion(
+        "BytesExtract",
+        "extract",
+        """{
+        |  "type": "BytesExtract",
+        |  "name": "BytesExtract",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputURI": "hdfs://*.jpg",
+        |  "outputView": "outputView"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/extract/#bytesextract"
+      ),
+      Completion(
+        "DeltaLakeExtract",
+        "extract",
+        """{
+        |  "type": "DeltaLakeExtract",
+        |  "name": "DeltaLakeExtract",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputURI": "hdfs://*.delta",
+        |  "outputView": "outputView"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/extract/#deltalakeextract"
+      ),
+      Completion(
+        "DelimitedExtract",
+        "extract",
+        """{
+        |  "type": "DelimitedExtract",
+        |  "name": "DelimitedExtract",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputURI": "hdfs://*.csv",
+        |  "outputView": "outputView",
+        |  "header": false
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/extract/#delimitedextract"
+      ),
+      Completion(
+        "HTTPExtract",
+        "extract",
+        """{
+        |  "type": "HTTPExtract",
+        |  "name": "HTTPExtract",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputURI": "https://",
+        |  "outputView": "outputView"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/extract/#httpextract"
+      ),
+      Completion(
+        "ImageExtract",
+        "extract",
+        """{
+        |  "type": "ImageExtract",
+        |  "name": "ImageExtract",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputURI": "hdfs://*.jpg",
+        |  "outputView": "outputView"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/extract/#imageextract"
+      ),
+      Completion(
+        "JDBCExtract",
+        "extract",
+        """{
+        |  "type": "JDBCExtract",
+        |  "name": "JDBCExtract",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputURI": "jdbc:postgresql://",
+        |  "tableName": "(SELECT * FROM ) outputView",
+        |  "outputView": "outputView"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/extract/#jdbcextract"
+      ),
+      Completion(
+        "JSONExtract",
+        "extract",
+        """{
+        |  "type": "JSONExtract",
+        |  "name": "JSONExtract",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputURI": "hdfs://*.json",
+        |  "outputView": "outputView"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/extract/#jsonextract"
+      ),
+      Completion(
+        "KafkaExtract",
+        "extract",
+        """{
+        |  "type": "KafkaExtract",
+        |  "name": "KafkaExtract",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "bootstrapServers": "kafka:9092",
+        |  "topic": "topic",
+        |  "groupID": "groupId",
+        |  "outputView": "outputView"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/extract/#kafkaextract"
+      ),
+      Completion(
+        "MetadataExtract",
+        "extract",
+        """{
+        |  "type": "MetadataExtract",
+        |  "name": "MetadataExtract",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputView": "inputView",
+        |  "outputView": "outputView"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/extract/#metadataextract"
+      ),
+      Completion(
+        "MongoExtract",
+        "extract",
+        """{
+        |  "type": "MongoExtract",
+        |  "name": "MongoExtract",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "options": {
+        |    "uri": "mongodb://username:password@mongo:27017",
+        |    "database": "database",
+        |    "collection": "collection",
+        |  },
+        |  "outputView": "outputView"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/extract/#mongoextract"
+      ),
+      Completion(
+        "ORCExtract",
+        "extract",
+        """{
+        |  "type": "ORCExtract",
+        |  "name": "ORCExtract",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputURI": "hdfs://*.orc",
+        |  "outputView": "outputView"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/extract/#orcextract"
+      ),
+      Completion(
+        "ParquetExtract",
+        "extract",
+        """{
+        |  "type": "ParquetExtract",
+        |  "name": "ParquetExtract",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputURI": "hdfs://*.parquet",
+        |  "outputView": "outputView"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/extract/#parquetextract"
+      ),
+      Completion(
+        "RateExtract",
+        "extract",
+        """{
+        |  "type": "RateExtract",
+        |  "name": "RateExtract",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "rowsPerSecond": 1,
+        |  "rampUpTime": 0,
+        |  "numPartitions": 10,
+        |  "outputView": "outputView"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/extract/#rateextract"
+      ),
+      Completion(
+        "SASExtract",
+        "extract",
+        """{
+        |  "type": "SASExtract",
+        |  "name": "SASExtract",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputURI": "hdfs://*.sas7bdat",
+        |  "outputView": "outputView"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/extract/#sasextract"
+      ),
+      Completion(
+        "TextExtract",
+        "extract",
+        """{
+        |  "type": "TextExtract",
+        |  "name": "TextExtract",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputURI": "hdfs://*.txt",
+        |  "outputView": "outputView"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/extract/#textextract"
+      ),
+      Completion(
+        "XMLExtract",
+        "extract",
+        """{
+        |  "type": "XMLExtract",
+        |  "name": "XMLExtract",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputURI": "hdfs://*.xml",
+        |  "outputView": "outputView"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/extract/#xmlextract"
+      ),
+      Completion(
+        "DiffTransform",
+        "transform",
+        """{
+        |  "type": "DiffTransform",
+        |  "name": "DiffTransform",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputLeftView": "inputLeftView",
+        |  "inputRightView": "inputRightView",
+        |  "outputLeftView": "outputLeftView",
+        |  "outputIntersectionView": "outputIntersectionView",
+        |  "outputRightView": "outputRightView"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/transform/#difftransform"
+      ),
+      Completion(
+        "HTTPTransform",
+        "transform",
+        """{
+        |  "type": "HTTPTransform",
+        |  "name": "HTTPTransform",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputView": "inputView",
+        |  "uri": "https://",
+        |  "outputView": "outputView"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/transform/#httptransform"
+      ),
+      Completion(
+        "JSONTransform",
+        "transform",
+        """{
+        |  "type": "JSONTransform",
+        |  "name": "JSONTransform",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputView": "inputView",
+        |  "outputView": "outputView"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/transform/#jsontransform"
+      ),
+      Completion(
+        "MetadataFilterTransform",
+        "transform",
+        """{
+        |  "type": "MetadataFilterTransform",
+        |  "name": "MetadataFilterTransform",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputView": "inputView",
+        |  "inputURI": "hdfs://*.sql",
+        |  "outputView": "outputView"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/transform/#metadatafiltertransform"
+      ),
+      Completion(
+        "MetadataTransform",
+        "transform",
+        """{
+        |  "type": "MetadataTransform",
+        |  "name": "MetadataTransform",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputView": "inputView",
+        |  "outputView": "outputView",
+        |  "schemaURI": "hdfs://*.json"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/transform/#metadatatransform"
+      ),
+      Completion(
+        "MLTransform",
+        "transform",
+        """{
+        |  "type": "MLTransform",
+        |  "name": "MLTransform",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputView": "inputView",
+        |  "inputURI": "hdfs://*.model",
+        |  "outputView": "outputView"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/transform/#mltransform"
+      ),
+      Completion(
+        "SimilarityJoinTransform",
+        "transform",
+        """{
+        |  "type": "SimilarityJoinTransform",
+        |  "name": "SimilarityJoinTransform",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "threshold": 0.75,
+        |  "leftView": "leftView",
+        |  "leftFields": [],
+        |  "rightView": "rightView",
+        |  "rightFields": [],
+        |  "outputView": "outputView"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/transform/#similarityjointransform"
+      ),
+      Completion(
+        "SQLTransform",
+        "transform",
+        """{
+        |  "type": "SQLTransform",
+        |  "name": "SQLTransform",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputURI": "hdfs://*.sql",
+        |  "outputView": "outputView"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/transform/#sqltransform"
+      ),
+      Completion(
+        "%sql",
+        "transform",
+        if (arcContext == null) {
+          """%sql name="sqlvalidate" outputView=outputView environments=production,test
+            |SELECT
+            |  *
+            |FROM inputView""".stripMargin
+        } else {
+          arcContext.userData.get("lastView").flatMap { lastView =>
+            try {
+              lastView.asInstanceOf[Option[String]]
+            } catch {
+              case e: Exception => None
+            }
+          } match {
+            case None => {
+              """%sql name="sqlvalidate" outputView=outputView environments=production,test
+              |SELECT
+              |  *
+              |FROM inputView""".stripMargin
+            }
+            case Some(lastView) => {
+              val df = spark.table(lastView)
+              df.columns
+              s"""%sql name="sqlvalidate" outputView=outputView environments=production,test
+              |SELECT
+              |${df.columns.map { col => if (col.indexOf(" ") == -1) col else s"`$col`" }.mkString("  ", "\n  ,", "")}
+              |FROM ${lastView}""".stripMargin
+            }
+          }
+        },
+        "sql",
+        "https://arc.tripl.ai/transform/#sqltransform"
+      ),
+      Completion(
+        "TensorFlowServingTransform",
+        "transform",
+        """{
+        |  "type": "TensorFlowServingTransform",
+        |  "name": "TensorFlowServingTransform",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "signatureName": "serving_default",
+        |  "inputView": "inputView",
+        |  "inputURI": "hdfs://*.sql",
+        |  "outputView": "outputView",
+        |
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/transform/#tensorflowservingtransform"
+      ),
 
+      Completion(
+        "TypingTransform",
+        "transform",
+        """{
+        |  "type": "TypingTransform",
+        |  "name": "TypingTransform",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputView": "inputView",
+        |  "schemaURI": "hdfs://*.json",
+        |  "outputView": "outputView"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/transform/#typingtransform"
+      ),
+      Completion(
+        "AvroLoad",
+        "load",
+        """{
+        |  "type": "AvroLoad",
+        |  "name": "AvroLoad",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputView": "inputView",
+        |  "outputURI": "hdfs://*.avro"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/load/#avroload"
+      ),
+      Completion(
+        "DeltaLakeLoad",
+        "load",
+        """{
+        |  "type": "DeltaLakeLoad",
+        |  "name": "DeltaLakeLoad",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputView": "inputView",
+        |  "outputURI": "hdfs://*.delta"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/load/#deltalakeload"
+      ),
+      Completion(
+        "DeltaLakeMergeLoad",
+        "load",
+        """{
+        |  "type": "DeltaLakeMergeLoad",
+        |  "name": "DeltaLakeMergeLoad",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputView": "inputView",
+        |  "outputURI": "hdfs://*.delta",
+        |  "condition": "source.primaryKey = target.primaryKey",
+        |  "whenNotMatchedByTargetInsert": {},
+        |  "whenNotMatchedBySourceDelete": {}
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/load/#deltalakemergeload"
+      ),
+      Completion(
+        "DelimitedLoad",
+        "load",
+        """{
+        |  "type": "DelimitedLoad",
+        |  "name": "DelimitedLoad",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputView": "inputView",
+        |  "outputURI": "hdfs://*.csv"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/load/#delimitedload"
+      ),
+      Completion(
+        "HTTPLoad",
+        "load",
+        """{
+        |  "type": "HTTPLoad",
+        |  "name": "HTTPLoad",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputView": "inputView",
+        |  "outputURI": "https://"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/load/#httpload"
+      ),
+      Completion(
+        "JDBCLoad",
+        "load",
+        """{
+        |  "type": "JDBCLoad",
+        |  "name": "JDBCLoad",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputView": "inputView",
+        |  "jdbcURL": "jdbc:postgresql://",
+        |  "tableName": "database.schema.table"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/load/#jdbcload"
+      ),
+      Completion(
+        "JSONLoad",
+        "load",
+        """{
+        |  "type": "JSONLoad",
+        |  "name": "JSONLoad",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputView": "inputView",
+        |  "outputURI": "hdfs://*.json"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/load/#jsonload"
+      ),
+      Completion(
+        "KafkaLoad",
+        "load",
+        """{
+        |  "type": "KafkaLoad",
+        |  "name": "KafkaLoad",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputView": "inputView",
+        |  "bootstrapServers": "kafka:9092",
+        |  "topic": "topic"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/load/#kafkaload"
+      ),
+      Completion(
+        "MongoLoad",
+        "load",
+        """{
+        |  "type": "MongoLoad",
+        |  "name": "MongoLoad",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputView": "inputView",
+        |  "options": {
+        |    "uri": "mongodb://username:password@mongo:27017",
+        |    "database": "database",
+        |    "collection": "collection",
+        |  }
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/load/#mongoload"
+      ),
+      Completion(
+        "ORCLoad",
+        "load",
+        """{
+        |  "type": "ORCLoad",
+        |  "name": "ORCLoad",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputView": "inputView",
+        |  "outputURI": "hdfs://*.orc"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/load/#orcload"
+      ),
+      Completion(
+        "ParquetLoad",
+        "load",
+        """{
+        |  "type": "ParquetLoad",
+        |  "name": "ParquetLoad",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputView": "inputView",
+        |  "outputURI": "hdfs://*.parquet"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/load/#parquetload"
+      ),
+      Completion(
+        "TextLoad",
+        "load",
+        """{
+        |  "type": "TextLoad",
+        |  "name": "TextLoad",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputView": "inputView",
+        |  "outputURI": "hdfs://*.txt"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/load/#textload"
+      ),
+      Completion(
+        "XMLLoad",
+        "load",
+        """{
+        |  "type": "XMLLoad",
+        |  "name": "XMLLoad",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputView": "inputView",
+        |  "outputURI": "hdfs://*.xml"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/load/#xmlload"
+      ),
+      Completion(
+        "HTTPExecute",
+        "execute",
+        """{
+        |  "type": "HTTPExecute",
+        |  "name": "HTTPExecute",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "uri": "https://",
+        |  "headers": {}
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/execute/#httpexecute"
+      ),
+      Completion(
+        "JDBCExecute",
+        "execute",
+        """{
+        |  "type": "JDBCExecute",
+        |  "name": "JDBCExecute",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputURI": "hdfs://*.sql",
+        |  "jdbcURL": "jdbc:postgresql://"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/execute/#jdbcexecute"
+      ),
+      Completion(
+        "KafkaCommitExecute",
+        "execute",
+        """{
+        |  "type": "KafkaCommitExecute",
+        |  "name": "KafkaCommitExecute",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputView": "inputView",
+        |  "bootstrapServers": "kafka:9092",
+        |  "groupID": "groupID"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/execute/#kafkacommitexecute"
+      ),
+      Completion(
+        "LogExecute",
+        "execute",
+        """{
+        |  "type": "LogExecute",
+        |  "name": "LogExecute",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputURI": "hdfs://*.sql"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/execute/#logexecute"
+      ),
+      Completion(
+        "%log",
+        "execute",
+        """%log name="log" environments=production,test
+        |SELECT
+        |  TO_JSON(
+        |    NAMED_STRUCT(
+        |      'key', 'value'
+        |    )
+        |  ) AS message""".stripMargin,
+        "sql",
+        "https://arc.tripl.ai/execute/#logexecute"
+      ),
+      Completion(
+        "PipelineExecute",
+        "execute",
+        """{
+        |  "type": "PipelineExecute",
+        |  "name": "PipelineExecute",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "uri": "hdfs://*.json"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/execute/#pipelineexecute"
+      ),
+      Completion(
+        "EqualityValidate",
+        "validate",
+        """{
+        |  "type": "EqualityValidate",
+        |  "name": "EqualityValidate",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "leftView": "leftView",
+        |  "rightView": "rightView"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/validate/#equalityvalidate"
+      ),
+      Completion(
+        "MetadataValidate",
+        "validate",
+        """{
+        |  "type": "MetadataValidate",
+        |  "name": "MetadataValidate",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputView": "inputView",
+        |  "inputURI": "hdfs://*.sql"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/validate/#metadatavalidate"
+      ),
+      Completion(
+        "SQLValidate",
+        "validate",
+        """{
+        |  "type": "SQLValidate",
+        |  "name": "SQLValidate",
+        |  "environments": [
+        |    "production",
+        |    "test"
+        |  ],
+        |  "inputURI": "hdfs://*.sql"
+        |}""".stripMargin,
+        "javascript",
+        "https://arc.tripl.ai/validate/#sqlvalidate"
+      ),
+      Completion(
+        "%sqlvalidate",
+        "validate",
+        """%sqlvalidate name="sqlvalidate" environments=production,test
+        |SELECT
+        |  TRUE AS valid
+        |  ,TO_JSON(
+        |    NAMED_STRUCT(
+        |      'key', 'value'
+        |    )
+        |  ) AS message""".stripMargin,
+        "sql",
+        "https://arc.tripl.ai/validate/#sqlvalidate"
+      )
+    )
 
+    val objectMapper = new ObjectMapper()
+    val jsonNodeFactory = new JsonNodeFactory(true)
+    val node = jsonNodeFactory.objectNode
+    val jupyterTypesArray = node.putArray("_jupyter_types_experimental")
 
+    completions.foreach { completion =>
+      val completionNode = jsonNodeFactory.objectNode
+      completionNode.set("text", jsonNodeFactory.textNode(completion.text))
+      completionNode.set("type", jsonNodeFactory.textNode(completion.textType))
+      completionNode.set("replaceText", jsonNodeFactory.textNode(completion.replaceText))
+      completionNode.set("language", jsonNodeFactory.textNode(completion.language))
+      completionNode.set("documentation", jsonNodeFactory.textNode(completion.documentation))
+      completionNode.set("sortBy", jsonNodeFactory.textNode(s"${completion.textType}:${completion.text}"))
+      jupyterTypesArray.add(completionNode)
+    }
 
-
-
-
+    (completions.map(_.text), RawJson(objectMapper.writeValueAsString(node).getBytes(StandardCharsets.UTF_8)))
+  }
 
   // This function comes from the Apahce Spark org.apache.spark.util.Utils private class
   /** Load properties present in the given file. */
@@ -347,7 +1239,7 @@ object Common {
    *
    * @param str
    * @return the trimmed value of str
-   */  
+   */
   def trimExceptCRLF(str: String): String = {
     val nonSpaceOrNaturalLineDelimiter: Char => Boolean = { ch =>
       ch > ' ' || ch == '\r' || ch == '\n'
@@ -360,6 +1252,6 @@ object Common {
     } else {
       ""
     }
-  }  
+  }
 
 }

@@ -59,6 +59,15 @@ case class FileDisplay(
 final class ArcInterpreter extends Interpreter {
 
   implicit var spark: SparkSession = _
+  implicit var arcContext: ARCContext = _
+
+  Logger.getLogger("org").setLevel(Level.ERROR)
+  Logger.getLogger("breeze").setLevel(Level.ERROR)
+
+  // the memory available to the container (i.e. the docker memory limit)
+  val physicalMemory = ManagementFactory.getOperatingSystemMXBean.asInstanceOf[com.sun.management.OperatingSystemMXBean].getTotalPhysicalMemorySize
+  // the JVM requested memory (-Xmx)
+  val runtimeMemory = Runtime.getRuntime.maxMemory
 
   val authenticateSecret = Common.randStr(64)
 
@@ -68,15 +77,13 @@ final class ArcInterpreter extends Interpreter {
   var confMaster = envOrNone("CONF_MASTER").getOrElse("local[*]")
   var confNumRows = Try(envOrNone("CONF_NUM_ROWS").get.toInt).getOrElse(20)
   var confTruncate = Try(envOrNone("CONF_TRUNCATE").get.toInt).getOrElse(50)
-  var confStreaming = false
   var confStreamingDuration = Try(envOrNone("CONF_STREAMING_DURATION").get.toInt).getOrElse(10)
   var confStreamingFrequency = Try(envOrNone("CONF_STREAMING_FREQUENCY").get.toInt).getOrElse(1000)
   var confMonospace = Try(envOrNone("CONF_DISPLAY_MONOSPACE").get.toBoolean).getOrElse(false)
   var confLeftAlign = Try(envOrNone("CONF_DISPLAY_LEFT_ALIGN").get.toBoolean).getOrElse(false)
   var confDatasetLabels = Try(envOrNone("CONF_DISPLAY_DATASET_LABELS").get.toBoolean).getOrElse(false)
+  var confStreaming = false
   var udfsRegistered = false
-
-  var isJupyterLab: Option[Boolean] = None
 
   // resolution is slow so dont keep repeating
   var memoizedPipelineStagePlugins: Option[List[ai.tripl.arc.plugins.PipelineStagePlugin]] = None
@@ -94,14 +101,100 @@ final class ArcInterpreter extends Interpreter {
       KernelInfo.LanguageInfo(
         "arc",
         ai.tripl.arc.jupyter.BuildInfo.version,
-        "text/arc",
-        "arc",
-        "text" // ???
+        "javascript",
+        ".json",
+        "arcexport",
+        None,
+        Some("javascript")
       ),
-      s"""Arc kernel Java ${sys.props.getOrElse("java.version", "[unknown]")}""".stripMargin
+      s"""arc-jupyter ${ai.tripl.arc.jupyter.BuildInfo.version} arc ${ai.tripl.arc.util.Utils.getFrameworkVersion}"""".stripMargin
     )
 
   @volatile private var count = 0
+
+  override def init(): Unit = {
+    startSession()
+  }
+
+  override def complete(code: String, pos: Int): Completion = {
+    val spaceIndex = code.indexOf(" ")
+    if (spaceIndex == -1 || (pos < spaceIndex)){
+      val (completions, completionsMeta) = Common.getCompletions()
+      Completion(0, code.length, completions, completionsMeta)
+    } else {
+      Completion.empty(pos)
+    }
+  }
+
+  def startSession(): SparkSession = {
+    val emptySession = SparkSession.getActiveSession.isEmpty
+
+    if (emptySession) {
+      val sessionBuilder = SparkSession
+        .builder()
+        .master(confMaster)
+        .appName("arc-jupyter")
+        .config("spark.sql.warehouse.dir", "/tmp/spark-warehouse")
+        .config("spark.authenticate.secret", authenticateSecret)
+        .config("spark.driver.maxResultSize", s"${(runtimeMemory * 0.8).toLong}B")
+
+      // read the defaults from spark-defaults.conf
+      Common.getPropertiesFromFile("/opt/spark/conf/spark-defaults.conf")
+        .filter { case (key, _) => key.startsWith("spark.") }
+        .foreach { case (key, value) => {
+          sessionBuilder.config(key, value)
+        }}
+
+      // add any spark overrides
+      System.getenv.asScala
+        .filter { case (key, _) => key.startsWith("conf_spark") }
+        // apply hadoop options after spark session creation
+        .filter { case (key, _) => !key.startsWith("conf_spark_hadoop") }
+        // you cannot override these settings for security
+        .filter { case (key, _) => !Seq("conf_spark_authenticate", "conf_spark_authenticate_secret", "conf_spark_io_encryption_enable", "conf_spark_network_crypto_enabled").contains(key) }
+        .foreach{ case (key: String, value: String) => {
+          sessionBuilder.config(key.replaceFirst("conf_","").replaceAll("_", "."), value)
+        }}
+
+      val session = sessionBuilder.getOrCreate()
+      spark = session
+
+      // add any hadoop overrides
+      System.getenv.asScala
+        .filter { case (key, _) => key.startsWith("conf_spark_hadoop") }
+        .foreach { case (key, value) => {
+          spark.sparkContext.hadoopConfiguration.set(key.replaceFirst("conf_spark_hadoop_","").replaceAll("_", "."), value)
+        }}
+
+      val loader = ai.tripl.arc.util.Utils.getContextOrSparkClassLoader
+      implicit val logger = LoggerFactory.getLogger("arc-jupyter")
+
+      val sparkConf = new java.util.HashMap[String, String]()
+      spark.sparkContext.getConf.getAll.filter{ case (k, _) => !Seq("spark.authenticate.secret").contains(k) }.foreach{ case (k, v) => sparkConf.put(k, v) }
+
+      logger.info()
+        .field("config", sparkConf)
+        .field("sparkVersion", spark.version)
+        .field("arcVersion", ai.tripl.arc.util.Utils.getFrameworkVersion)
+        .field("arcJupyterVersion", ai.tripl.arc.jupyter.BuildInfo.version)
+        .field("hadoopVersion", org.apache.hadoop.util.VersionInfo.getVersion)
+        .field("scalaVersion", scala.util.Properties.versionNumberString)
+        .field("javaVersion", System.getProperty("java.runtime.version"))
+        .field("runtimeMemory", s"${runtimeMemory}B")
+        .field("physicalMemory", s"${physicalMemory}B")
+        .log()
+
+      // only set default aws provider override if not provided
+      if (Option(spark.sparkContext.hadoopConfiguration.get("fs.s3a.aws.credentials.provider")).isEmpty) {
+        spark.sparkContext.hadoopConfiguration.set("fs.s3a.aws.credentials.provider", ai.tripl.arc.util.CloudUtils.defaultAWSProvidersOverride)
+      }
+
+      // start the sqlcontext
+      spark.sql("""SELECT TRUE""")
+    }
+
+    SparkSession.getActiveSession.get
+  }
 
   def execute(
     code: String,
@@ -113,90 +206,18 @@ final class ArcInterpreter extends Interpreter {
     var executionListener: Option[ProgressSparkListener] = None
 
     try {
-      Logger.getLogger("org").setLevel(Level.ERROR)
-      Logger.getLogger("breeze").setLevel(Level.ERROR)
-
-      // the memory available to the container (i.e. the docker memory limit)
-      val physicalMemory = ManagementFactory.getOperatingSystemMXBean.asInstanceOf[com.sun.management.OperatingSystemMXBean].getTotalPhysicalMemorySize
-      // the JVM requested memory (-Xmx)
-      val runtimeMemory = Runtime.getRuntime.maxMemory
       val executeResult = if (runtimeMemory > physicalMemory) {
         return ExecuteResult.Error(s"Cannot execute as requested JVM memory (-Xmx${FileUtils.byteCountToDisplaySize(runtimeMemory)}B) exceeds available system memory (${FileUtils.byteCountToDisplaySize(physicalMemory)}B) limit.\nEither decrease the requested JVM memory or, if running in Docker, increase the Docker memory limit.")
+      } else if (spark == null) {
+        return ExecuteResult.Error(s"SparkSession has not been initialised. Please restart Kernel or wait for startup completion.")
       } else {
-
-        val firstRun = SparkSession.getActiveSession.isEmpty
-
-        val sessionBuilder = SparkSession
-          .builder()
-          .master(confMaster)
-          .appName("arc-jupyter")
-          .config("spark.sql.warehouse.dir", "/tmp/spark-warehouse")
-          .config("spark.authenticate.secret", authenticateSecret)
-          .config("spark.driver.maxResultSize", s"${(runtimeMemory * 0.8).toLong}B")
-
-        // read the defaults from spark-defaults.conf
-        Common.getPropertiesFromFile("/opt/spark/conf/spark-defaults.conf")
-          .filter { case (key, _) => key.startsWith("spark.") }
-          .foreach { case (key, value) => {
-            sessionBuilder.config(key, value)
-          }}
-
-        // add any spark overrides
-        System.getenv.asScala
-          .filter { case (key, _) => key.startsWith("conf_spark") }
-          // apply hadoop options after spark session creation
-          .filter { case (key, _) => !key.startsWith("conf_spark_hadoop") }
-          // you cannot override these settings for security
-          .filter { case (key, _) => !Seq("conf_spark_authenticate", "conf_spark_authenticate_secret", "conf_spark_io_encryption_enable", "conf_spark_network_crypto_enabled").contains(key) }
-          .foreach{ case (key: String, value: String) => {
-            sessionBuilder.config(key.replaceFirst("conf_","").replaceAll("_", "."), value)
-          }}
-
-        val session = sessionBuilder.getOrCreate()
-        spark = session
-
-        // add any hadoop overrides
-        System.getenv.asScala
-          .filter { case (key, _) => key.startsWith("conf_spark_hadoop") }
-          .foreach { case (key, value) => {
-            spark.sparkContext.hadoopConfiguration.set(key.replaceFirst("conf_spark_hadoop_","").replaceAll("_", "."), value)
-          }}
-
-        val loader = ai.tripl.arc.util.Utils.getContextOrSparkClassLoader
-
         implicit val logger = LoggerFactory.getLogger("arc-jupyter")
-
-        if (firstRun) {
-          val sparkConf = new java.util.HashMap[String, String]()
-          spark.sparkContext.getConf.getAll.filter{ case (k, _) => !Seq("spark.authenticate.secret").contains(k) }.foreach{ case (k, v) => sparkConf.put(k, v) }
-
-          logger.info()
-            .field("config", sparkConf)
-            .field("sparkVersion", spark.version)
-            .field("arcVersion", ai.tripl.arc.util.Utils.getFrameworkVersion)
-            .field("arcJupyterVersion", ai.tripl.arc.jupyter.BuildInfo.version)
-            .field("hadoopVersion", org.apache.hadoop.util.VersionInfo.getVersion)
-            .field("scalaVersion", scala.util.Properties.versionNumberString)
-            .field("javaVersion", System.getProperty("java.runtime.version"))
-            .field("runtimeMemory", s"${runtimeMemory}B")
-            .field("physicalMemory", s"${physicalMemory}B")
-            .log()
-
-          // only set default aws provider override if not provided
-          if (Option(spark.sparkContext.hadoopConfiguration.get("fs.s3a.aws.credentials.provider")).isEmpty) {
-            spark.sparkContext.hadoopConfiguration.set("fs.s3a.aws.credentials.provider", ai.tripl.arc.util.CloudUtils.defaultAWSProvidersOverride)
-          }
-        }
-
+        
+        // if session config changed and session stopped
+        val session = startSession()
         import session.implicits._
 
-        // detect jupyterlab
-        val jupyterLab = isJupyterLab.getOrElse(
-          scala.util.Properties.envOrNone("JUPYTER_ENABLE_LAB") match {
-            case Some(j) if (j == "yes") => true
-            case None => false
-          }
-        )
+        val loader = ai.tripl.arc.util.Utils.getContextOrSparkClassLoader
 
         // parse input
         val lines = code.trim.split("\n")
@@ -206,9 +227,10 @@ final class ArcInterpreter extends Interpreter {
           }
           case x if (x.startsWith("%sql") || x.startsWith("%log")) => {
             val commandArgs = parseArgs(lines(0))
-            val name = commandArgs.get("name") match {
-              case Some(name) => name
-              case None => ""
+            var name = commandArgs.get("name") match {
+              case Some(name) => 
+                s"""${if (!name.startsWith("\"")) "\"" else ""}$name${if (!name.endsWith("\"")) "\"" else ""}"""
+              case None => "\"\""
             }
             val description = commandArgs.get("description") match {
               case Some(description) => description
@@ -226,7 +248,7 @@ final class ArcInterpreter extends Interpreter {
                 case x if x.startsWith("%sqlvalidate") =>
                   s"""{
                     |  "type": "SQLValidate",
-                    |  "name": "${name}",
+                    |  "name": ${name},
                     |  "description": "${description}",
                     |  "environments": [],
                     |  "sql": \"\"\"${stmt}\"\"\",
@@ -235,7 +257,7 @@ final class ArcInterpreter extends Interpreter {
                 case x if x.startsWith("%sql") =>
                   s"""{
                     |  "type": "SQLTransform",
-                    |  "name": "${name}",
+                    |  "name": ${name},
                     |  "description": "${description}",
                     |  "environments": [],
                     |  "sql": \"\"\"${stmt}\"\"\",
@@ -246,7 +268,7 @@ final class ArcInterpreter extends Interpreter {
                 case x if x.startsWith("%log") =>
                   s"""{
                     |  "type": "LogExecute",
-                    |  "name": "${name}",
+                    |  "name": ${name},
                     |  "description": "${description}",
                     |  "environments": [],
                     |  "sql": \"\"\"${stmt}\"\"\",
@@ -337,7 +359,7 @@ final class ArcInterpreter extends Interpreter {
           }
         }
 
-        implicit val arcContext = ARCContext(
+        arcContext = ARCContext(
           jobId=None,
           jobName=None,
           environment=None,
@@ -367,7 +389,7 @@ final class ArcInterpreter extends Interpreter {
           case Some(outputHandler) => {
             interpreter match {
               case "arc" | "summary" => {
-                val listener = new ProgressSparkListener(listenerElementHandle, jupyterLab)(outputHandler, logger)
+                val listener = new ProgressSparkListener(listenerElementHandle)(outputHandler, logger)
                 listener.init()(outputHandler)
                 spark.sparkContext.addSparkListener(listener)
                 executionListener = Option(listener)

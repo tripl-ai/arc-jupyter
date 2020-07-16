@@ -1,5 +1,10 @@
 # Change Log
 
+## 3.1.0
+
+- intialise Spark on Kernel startup to slightly increase user experience.
+- add `completer` functionality to allow code completions in JupyterLab.
+
 ## 3.0.1
 
 - add configurations from `/opt/spark/conf/spark-defaults.conf` to simplify keeping `arc` and `arc-jupter` options in sync.

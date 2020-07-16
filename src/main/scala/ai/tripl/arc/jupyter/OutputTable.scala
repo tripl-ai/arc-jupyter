@@ -1,6 +1,7 @@
 package ai.tripl.arc.jupyter
 
 import java.security.SecureRandom
+import scala.collection.JavaConverters._
 
 import org.apache.spark.sql.{DataFrame, SparkSession}
 
@@ -73,6 +74,17 @@ case class OutputTablePlugin (
         }
         case None =>
       }
+    } else {
+      // listen to the final stage and if there is an "outputView" field in the case class register it
+      // TODO: move this to a trait
+      val outputView = try {
+        val field = stage.getClass().getDeclaredField("outputView")
+        field.setAccessible(true)
+        Some(field.get(stage).asInstanceOf[String])
+      } catch {
+        case e: Exception => None
+      }
+      arcContext.userData.put("lastView", outputView)
     }
 
     result
