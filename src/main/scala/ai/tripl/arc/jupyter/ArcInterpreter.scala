@@ -119,8 +119,7 @@ final class ArcInterpreter extends Interpreter {
   override def complete(code: String, pos: Int): Completion = {
     val spaceIndex = code.indexOf(" ")
     if (spaceIndex == -1 || (pos < spaceIndex)){
-      val (completions, completionsMeta) = Common.getCompletions()
-      Completion(0, code.length, completions, completionsMeta)
+      Common.getCompletions(pos, code.length)
     } else {
       Completion.empty(pos)
     }
@@ -212,7 +211,7 @@ final class ArcInterpreter extends Interpreter {
         return ExecuteResult.Error(s"SparkSession has not been initialised. Please restart Kernel or wait for startup completion.")
       } else {
         implicit val logger = LoggerFactory.getLogger("arc-jupyter")
-        
+
         // if session config changed and session stopped
         val session = startSession()
         import session.implicits._
@@ -228,7 +227,7 @@ final class ArcInterpreter extends Interpreter {
           case x if (x.startsWith("%sql") || x.startsWith("%log")) => {
             val commandArgs = parseArgs(lines(0))
             var name = commandArgs.get("name") match {
-              case Some(name) => 
+              case Some(name) =>
                 s"""${if (!name.startsWith("\"")) "\"" else ""}$name${if (!name.endsWith("\"")) "\"" else ""}"""
               case None => "\"\""
             }
@@ -301,7 +300,7 @@ final class ArcInterpreter extends Interpreter {
           }
           case x if (x.startsWith("%list")) => {
             ("list", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
-          }          
+          }
           case x if (x.startsWith("%env")) => {
             ("env", parseArgs(lines.mkString(" ")), "")
           }
@@ -619,7 +618,7 @@ final class ArcInterpreter extends Interpreter {
             val uri = new URI(command.trim)
             val fs = FileSystem.get(uri, spark.sparkContext.hadoopConfiguration)
             val fileStatus = fs.globStatus(new Path(uri))
-            val df = fileStatus.map { file => 
+            val df = fileStatus.map { file =>
               FileDisplay(
                 file.getPath.getParent.toString,
                 file.getPath.getName,
@@ -636,7 +635,7 @@ final class ArcInterpreter extends Interpreter {
             ExecuteResult.Success(
               DisplayData.html(Common.renderHTML(df, None, numRows, truncate, monospace, leftAlign, datasetLabels))
             )
-          }          
+          }
         }
       }
 
