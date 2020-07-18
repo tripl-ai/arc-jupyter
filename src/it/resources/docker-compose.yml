@@ -7,16 +7,16 @@ networks:
     driver: bridge
     ipam:
      config:
-       - subnet: 172.19.0.0/24  
+       - subnet: 172.19.0.0/24
 
 services:
   sbt:
     container_name: sbt
-    image: mozilla/sbt:8u232_1.3.8 
+    image: mozilla/sbt:8u232_1.3.13
     networks:
-      - arc-integration     
+      - arc-integration
     command: tail -f /dev/null
     volumes:
-      - ${PWD}:/app  
+      - ${PWD}:/app
       - /tmp/pgp:/pgp
     working_dir: /app

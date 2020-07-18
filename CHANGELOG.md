@@ -1,5 +1,9 @@
 # Change Log
 
+## 3.2.0
+
+- move completion logic to Arc `JupyterCompleter`, `ExtractPipelineStage`, `TransformPipelineStage` traits to allow users to define custom completions via plugins.
+
 ## 3.1.0
 
 - intialise Spark on Kernel startup to slightly increase user experience.
