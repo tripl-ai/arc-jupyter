@@ -220,9 +220,9 @@ final class ArcInterpreter extends Interpreter {
 
         // parse input
         val lines = code.trim.split("\n")
-        val (interpreter, commandArgs, command) = lines(0) match {
+        val (interpreter, commandArgs, command, deregister) = lines(0) match {
           case x if (x.startsWith("%arc")) => {
-            ("arc", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
+            ("arc", parseArgs(lines(0)), lines.drop(1).mkString("\n"), None)
           }
           case x if (x.startsWith("%sql") || x.startsWith("%log")) => {
             val commandArgs = parseArgs(lines(0))
@@ -242,6 +242,7 @@ final class ArcInterpreter extends Interpreter {
             }
             val params = envParams ++ sqlParams
             val stmt = SQLUtils.injectParameters(lines.drop(1).mkString("\n"), params, true)
+            val rnd = Common.randStr(32)
             ("arc", parseArgs(lines(0)),
               lines(0) match {
                 case x if x.startsWith("%sqlvalidate") =>
@@ -260,7 +261,7 @@ final class ArcInterpreter extends Interpreter {
                     |  "description": "${description}",
                     |  "environments": [],
                     |  "sql": \"\"\"${stmt}\"\"\",
-                    |  "outputView": "${commandArgs.getOrElse("outputView", Common.randStr(32))}",
+                    |  "outputView": "${commandArgs.getOrElse("outputView", rnd)}",
                     |  "persist": ${commandArgs.getOrElse("persist", "false")},
                     |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "outputView", "numRows", "truncate", "persist", "monospace", "leftAlign", "datasetLabels", "streamingDuration").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
                     |}""".stripMargin
@@ -275,48 +276,49 @@ final class ArcInterpreter extends Interpreter {
                     |}""".stripMargin
                 case _ => ""
               }
+              ,Option(rnd)
             )
           }
           case x if (x.startsWith("%configplugin")) => {
-            ("configplugin", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
+            ("configplugin", parseArgs(lines(0)), lines.drop(1).mkString("\n"), None)
           }
           case x if (x.startsWith("%lifecycleplugin")) => {
-            ("lifecycleplugin", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
+            ("lifecycleplugin", parseArgs(lines(0)), lines.drop(1).mkString("\n"), None)
           }
           case x if (x.startsWith("%schema")) => {
-            ("schema", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
+            ("schema", parseArgs(lines(0)), lines.drop(1).mkString("\n"), None)
           }
           case x if (x.startsWith("%printschema")) => {
-            ("printschema", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
+            ("printschema", parseArgs(lines(0)), lines.drop(1).mkString("\n"), None)
           }
           case x if (x.startsWith("%metadata")) => {
-            ("metadata", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
+            ("metadata", parseArgs(lines(0)), lines.drop(1).mkString("\n"), None)
           }
           case x if (x.startsWith("%printmetadata")) => {
-            ("printmetadata", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
+            ("printmetadata", parseArgs(lines(0)), lines.drop(1).mkString("\n"), None)
           }
           case x if (x.startsWith("%summary")) => {
-            ("summary", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
+            ("summary", parseArgs(lines(0)), lines.drop(1).mkString("\n"), None)
           }
           case x if (x.startsWith("%list")) => {
-            ("list", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
+            ("list", parseArgs(lines(0)), lines.drop(1).mkString("\n"), None)
           }
           case x if (x.startsWith("%env")) => {
-            ("env", parseArgs(lines.mkString(" ")), "")
+            ("env", parseArgs(lines.mkString(" ")), "", None)
           }
           case x if (x.startsWith("%secret")) => {
-            ("secret", parseArgs(lines.mkString(" ")), lines.drop(1).mkString("\n"))
+            ("secret", parseArgs(lines.mkString(" ")), lines.drop(1).mkString("\n"), None)
           }
           case x if (x.startsWith("%conf")) => {
-            ("conf", parseArgs(lines.mkString(" ")), "")
+            ("conf", parseArgs(lines.mkString(" ")), "", None)
           }
           case x if (x.startsWith("%version")) => {
-            ("version", parseArgs(lines(0)), "")
+            ("version", parseArgs(lines(0)), "", None)
           }
           case x if (x.startsWith("%help")) => {
-            ("help", parseArgs(""), "")
+            ("help", parseArgs(""), "", None)
           }
-          case _ => ("arc", collection.mutable.Map[String, String](), code.trim)
+          case _ => ("arc", collection.mutable.Map[String, String](), code.trim, None)
         }
 
         val numRows = Try(commandArgs.get("numRows").get.toInt).getOrElse(confNumRows)
@@ -439,6 +441,13 @@ final class ArcInterpreter extends Interpreter {
                           case Some(df) => {
                             val result = Common.renderResult(spark, outputHandler, pipeline.stages.lastOption, df, numRows, truncate, monospace, leftAlign, datasetLabels, streamingDuration, confStreamingFrequency)
                             memoizedUserData = arcCtx.userData
+                            deregister.foreach { viewName => {
+                              try {
+                                spark.catalog.dropTempView(viewName.toLowerCase())
+                              } catch {
+                                case e: Exception =>
+                              }
+                            }}
                             result
                           }
                           case None => {
