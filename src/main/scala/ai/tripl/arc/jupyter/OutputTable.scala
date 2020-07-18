@@ -75,16 +75,16 @@ case class OutputTablePlugin (
         case None =>
       }
     } else {
-      // listen to the final stage and if there is an "outputView" field in the case class register it
-      // TODO: move this to a trait
-      val outputView = try {
-        val field = stage.getClass().getDeclaredField("outputView")
-        field.setAccessible(true)
-        Some(field.get(stage).asInstanceOf[String])
-      } catch {
-        case e: Exception => None
+      // register last view
+      stage match {
+        case s: ExtractPipelineStage => {
+          arcContext.userData.put("lastView", s.outputView)
+        }
+        case s: TransformPipelineStage => {
+          arcContext.userData.put("lastView", s.outputView)
+        }
+        case _ => arcContext.userData.remove("lastView")
       }
-      arcContext.userData.put("lastView", outputView)
     }
 
     result
