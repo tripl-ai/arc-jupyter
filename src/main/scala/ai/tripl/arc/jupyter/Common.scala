@@ -359,7 +359,7 @@ object Common {
         Completer(
           "%sql",
           "transform",
-          """%sql name="sqlvalidate" outputView=outputView environments=production,test
+          """%sql name="sqltransform" outputView=outputView environments=production,test
           |SELECT
           |  *
           |FROM inputView""".stripMargin,
@@ -401,7 +401,7 @@ object Common {
         Completer(
           s"%sql ${name}",
           "transform",
-          s"""%sql name="sqlvalidate" outputView=outputView environments=production,test
+          s"""%sql name="${name}" outputView=outputView environments=production,test
           |SELECT
           |${fields.mkString("  ", "\n  ,", "")}
           |FROM ${name}""".stripMargin,
