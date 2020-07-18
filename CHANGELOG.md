@@ -1,5 +1,9 @@
 # Change Log
 
+## 3.2.1
+
+- do not show anonymous views in `%sql` completer options.
+
 ## 3.2.0
 
 - move completion logic to Arc `JupyterCompleter`, `ExtractPipelineStage`, `TransformPipelineStage` traits to allow users to define custom completions via plugins.
