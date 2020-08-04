@@ -1,5 +1,9 @@
 # Change Log
 
+## 3.3.0
+
+- make completion run asyncronously so it does not have to wait for all running stages to complete before returning completions.
+
 ## 3.2.1
 
 - do not show anonymous views in `%sql` completer options.
