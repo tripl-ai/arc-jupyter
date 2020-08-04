@@ -19,6 +19,7 @@ import util.control.Breaks._
 import almond.interpreter.{Completion, ExecuteResult, Inspection, Interpreter}
 import almond.interpreter.api.{DisplayData, OutputHandler}
 import almond.interpreter.input.InputManager
+import almond.interpreter.util.CancellableFuture
 import almond.protocol.KernelInfo
 
 import org.apache.commons.io.FileUtils
@@ -116,13 +117,16 @@ final class ArcInterpreter extends Interpreter {
     startSession()
   }
 
-  override def complete(code: String, pos: Int): Completion = {
+  override def asyncComplete(code: String, pos: Int): Option[CancellableFuture[Completion]] = {
     val spaceIndex = code.indexOf(" ")
-    if (spaceIndex == -1 || (pos < spaceIndex)){
-      Common.getCompletions(pos, code.length)
+    val res = if (spaceIndex == -1 || (pos < spaceIndex)){
+      val c = Common.getCompletions(pos, code.length)
+      CancellableFuture(Future.successful(c), () => sys.error("should not happen"))
     } else {
-      Completion.empty(pos)
+      val c = Completion.empty(pos)
+      CancellableFuture(Future.successful(c), () => sys.error("should not happen"))
     }
+    Some(res)
   }
 
   def startSession(): SparkSession = {
@@ -136,6 +140,7 @@ final class ArcInterpreter extends Interpreter {
         .config("spark.sql.warehouse.dir", "/tmp/spark-warehouse")
         .config("spark.authenticate.secret", authenticateSecret)
         .config("spark.driver.maxResultSize", s"${(runtimeMemory * 0.8).toLong}B")
+        .config("spark.scheduler.mode", "FAIR")
 
       // read the defaults from spark-defaults.conf
       Common.getPropertiesFromFile("/opt/spark/conf/spark-defaults.conf")
