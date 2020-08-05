@@ -11,7 +11,7 @@ object Dependencies {
 
   val kernel = "sh.almond" %% "kernel" % "0.10.4"
 
-  val arc = "ai.tripl" %% "arc" % "3.1.1" % "provided"
+  val arc = "ai.tripl" %% "arc" % "3.2.0" % "provided"
 
   val etlDeps = Seq(
     sparkCore,

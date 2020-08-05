@@ -1,5 +1,9 @@
 # Change Log
 
+## 3.4.0
+
+- update ArcContext to support inline Schemas.
+
 ## 3.3.0
 
 - make completion run asyncronously so it does not have to wait for all running stages to complete before returning completions.

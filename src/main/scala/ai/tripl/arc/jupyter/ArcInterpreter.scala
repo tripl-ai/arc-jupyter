@@ -62,9 +62,6 @@ final class ArcInterpreter extends Interpreter {
   implicit var spark: SparkSession = _
   implicit var arcContext: ARCContext = _
 
-  Logger.getLogger("org").setLevel(Level.ERROR)
-  Logger.getLogger("breeze").setLevel(Level.ERROR)
-
   // the memory available to the container (i.e. the docker memory limit)
   val physicalMemory = ManagementFactory.getOperatingSystemMXBean.asInstanceOf[com.sun.management.OperatingSystemMXBean].getTotalPhysicalMemorySize
   // the JVM requested memory (-Xmx)
@@ -83,6 +80,8 @@ final class ArcInterpreter extends Interpreter {
   var confMonospace = Try(envOrNone("CONF_DISPLAY_MONOSPACE").get.toBoolean).getOrElse(false)
   var confLeftAlign = Try(envOrNone("CONF_DISPLAY_LEFT_ALIGN").get.toBoolean).getOrElse(false)
   var confDatasetLabels = Try(envOrNone("CONF_DISPLAY_DATASET_LABELS").get.toBoolean).getOrElse(false)
+  var policyInlineSQL = Try(envOrNone("ETL_POLICY_INLINE_SQL").get.toBoolean).getOrElse(false)
+  var policyInlineSchema = Try(envOrNone("ETL_POLICY_INLINE_SCHEMA").get.toBoolean).getOrElse(false)
   var confStreaming = false
   var udfsRegistered = false
 
@@ -186,6 +185,8 @@ final class ArcInterpreter extends Interpreter {
         .field("javaVersion", System.getProperty("java.runtime.version"))
         .field("runtimeMemory", s"${runtimeMemory}B")
         .field("physicalMemory", s"${physicalMemory}B")
+        .field("policyInlineSQL", policyInlineSQL.toString)
+        .field("policyInlineSchema", policyInlineSchema.toString)
         .log()
 
       // only set default aws provider override if not provided
@@ -369,7 +370,6 @@ final class ArcInterpreter extends Interpreter {
           jobId=None,
           jobName=None,
           environment=None,
-          environmentId=None,
           configUri=None,
           isStreaming=confStreaming,
           ignoreEnvironments=true,
@@ -382,7 +382,10 @@ final class ArcInterpreter extends Interpreter {
           pipelineStagePlugins=pipelineStagePlugins,
           udfPlugins=udfPlugins,
           serializableConfiguration=new SerializableConfiguration(spark.sparkContext.hadoopConfiguration),
-          userData=memoizedUserData
+          userData=memoizedUserData,
+          ipynb=true,
+          inlineSchema=policyInlineSchema,
+          inlineSQL=policyInlineSQL,
         )
 
         // register udfs once
