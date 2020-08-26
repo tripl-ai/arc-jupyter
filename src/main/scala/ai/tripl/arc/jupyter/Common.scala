@@ -312,9 +312,10 @@ object Common {
   def randStr(n:Int) = (1 to n).map(x => alpha(secureRandom.nextInt.abs % size)).mkString
 
   // calculate a list of all the fields including nested in a schema
+  val notAlphanumeric = "([^abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789])".r
   def flattenSchema(schema: StructType, parents: Seq[String] = Seq()): Seq[Seq[String]] = {
     def escape(name: String): String = {
-      if (name.indexOf(" ") == -1 && name.indexOf(".") == -1 && name.indexOf("/") == -1) name else s"`$name`"
+      if (notAlphanumeric.findFirstMatchIn(name).isEmpty) name else s"`$name`"
     }
 
     schema.fields.flatMap {

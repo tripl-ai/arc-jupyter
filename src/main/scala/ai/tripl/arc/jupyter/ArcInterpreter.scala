@@ -82,6 +82,7 @@ final class ArcInterpreter extends Interpreter {
   var confMonospace = Try(envOrNone("CONF_DISPLAY_MONOSPACE").get.toBoolean).getOrElse(false)
   var confLeftAlign = Try(envOrNone("CONF_DISPLAY_LEFT_ALIGN").get.toBoolean).getOrElse(false)
   var confDatasetLabels = Try(envOrNone("CONF_DISPLAY_DATASET_LABELS").get.toBoolean).getOrElse(false)
+  var confExtendedErrors = Try(envOrNone("CONF_DISPLAY_EXTENDED_ERRORS").get.toBoolean).getOrElse(false)
   var policyInlineSQL = Try(envOrNone("ETL_POLICY_INLINE_SQL").get.toBoolean).getOrElse(true)
   var policyInlineSchema = Try(envOrNone("ETL_POLICY_INLINE_SCHEMA").get.toBoolean).getOrElse(true)
   var confStreaming = false
@@ -548,60 +549,15 @@ final class ArcInterpreter extends Interpreter {
               }
               case None =>
             }
-            if (confNumRows != numRows) confNumRows = numRows
-            if (confTruncate != truncate) confTruncate = truncate
-            commandArgs.get("streaming") match {
-              case Some(streaming) => {
-                try {
-                  val streamingValue = streaming.toBoolean
-                  confStreaming = streamingValue
-                } catch {
-                  case e: Exception =>
-                }
-              }
-              case None =>
-            }
-            commandArgs.get("monospace") match {
-              case Some(monospace) => {
-                try {
-                  confMonospace = monospace.toBoolean
-                } catch {
-                  case e: Exception =>
-                }
-              }
-              case None =>
-            }
-            commandArgs.get("leftAlign") match {
-              case Some(leftAlign) => {
-                try {
-                  confLeftAlign = leftAlign.toBoolean
-                } catch {
-                  case e: Exception =>
-                }
-              }
-              case None =>
-            }
-            commandArgs.get("datasetLabels") match {
-              case Some(datasetLabels) => {
-                try {
-                  confDatasetLabels = datasetLabels.toBoolean
-                } catch {
-                  case e: Exception =>
-                }
-              }
-              case None =>
-            }
-            commandArgs.get("streamingDuration") match {
-              case Some(streamingDuration) => {
-                try {
-                  val streamingDurationValue = streamingDuration.toInt
-                  confStreamingDuration = streamingDurationValue
-                } catch {
-                  case e: Exception =>
-                }
-              }
-              case None =>
-            }
+            confNumRows = Try(commandArgs.get("numRows").get.toInt).getOrElse(confNumRows)
+            confTruncate = Try(commandArgs.get("truncate").get.toInt).getOrElse(confTruncate)
+            confStreaming = Try(commandArgs.get("streaming").get.toBoolean).getOrElse(confStreaming)
+            confStreamingDuration = Try(commandArgs.get("streamingDuration").get.toInt).getOrElse(confStreamingDuration)
+            confMonospace = Try(commandArgs.get("monospace").get.toBoolean).getOrElse(confMonospace)
+            confLeftAlign = Try(commandArgs.get("leftAlign").get.toBoolean).getOrElse(confLeftAlign)
+            confDatasetLabels = Try(commandArgs.get("datasetLabels").get.toBoolean).getOrElse(confDatasetLabels)
+            confExtendedErrors = Try(commandArgs.get("extendedErrors").get.toBoolean).getOrElse(confExtendedErrors)
+
             val text = s"""
             |Arc Options:
             |master: ${confMaster}
@@ -611,6 +567,7 @@ final class ArcInterpreter extends Interpreter {
             |streamingDuration: ${confStreamingDuration}
             |
             |Display Options:
+            |extendedErrors: ${confExtendedErrors}
             |datasetLabels: ${confDatasetLabels}
             |leftAlign: ${leftAlign}
             |monospace: ${confMonospace}
@@ -666,9 +623,13 @@ final class ArcInterpreter extends Interpreter {
     } catch {
       case e: Exception => {
         removeListener(spark, executionListener, true)(outputHandler)
-        val exceptionThrowables = ExceptionUtils.getThrowableList(e).asScala
-        val exceptionThrowablesMessages = exceptionThrowables.map(e => e.getMessage).mkString("\n")
-        ExecuteResult.Error(exceptionThrowablesMessages)
+        if (confExtendedErrors) {
+          val exceptionThrowables = ExceptionUtils.getThrowableList(e).asScala
+          val exceptionThrowablesMessages = exceptionThrowables.map(e => e.getMessage).mkString("\n\n")
+          ExecuteResult.Error(exceptionThrowablesMessages)
+        } else {
+          ExecuteResult.Error(e.getMessage)
+        }
       }
     }
   }
