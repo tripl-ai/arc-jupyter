@@ -32,6 +32,8 @@ import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
 import org.apache.spark.storage.StorageLevel
 
+import org.apache.commons.lang3.exception.ExceptionUtils
+
 import com.typesafe.config._
 
 import ai.tripl.arc.api.API.ARCContext
@@ -80,8 +82,8 @@ final class ArcInterpreter extends Interpreter {
   var confMonospace = Try(envOrNone("CONF_DISPLAY_MONOSPACE").get.toBoolean).getOrElse(false)
   var confLeftAlign = Try(envOrNone("CONF_DISPLAY_LEFT_ALIGN").get.toBoolean).getOrElse(false)
   var confDatasetLabels = Try(envOrNone("CONF_DISPLAY_DATASET_LABELS").get.toBoolean).getOrElse(false)
-  var policyInlineSQL = Try(envOrNone("ETL_POLICY_INLINE_SQL").get.toBoolean).getOrElse(false)
-  var policyInlineSchema = Try(envOrNone("ETL_POLICY_INLINE_SCHEMA").get.toBoolean).getOrElse(false)
+  var policyInlineSQL = Try(envOrNone("ETL_POLICY_INLINE_SQL").get.toBoolean).getOrElse(true)
+  var policyInlineSchema = Try(envOrNone("ETL_POLICY_INLINE_SCHEMA").get.toBoolean).getOrElse(true)
   var confStreaming = false
   var udfsRegistered = false
 
@@ -118,14 +120,12 @@ final class ArcInterpreter extends Interpreter {
 
   override def asyncComplete(code: String, pos: Int): Option[CancellableFuture[Completion]] = {
     val spaceIndex = code.indexOf(" ")
-    val res = if (spaceIndex == -1 || (pos < spaceIndex)){
+    if (spaceIndex == -1 || (pos < spaceIndex)){
       val c = Common.getCompletions(pos, code.length)
-      CancellableFuture(Future.successful(c), () => sys.error("should not happen"))
+      Some(CancellableFuture(Future.successful(c), () => sys.error("should not happen")))
     } else {
-      val c = Completion.empty(pos)
-      CancellableFuture(Future.successful(c), () => sys.error("should not happen"))
+      None
     }
-    Some(res)
   }
 
   def startSession(): SparkSession = {
@@ -634,10 +634,10 @@ final class ArcInterpreter extends Interpreter {
           case "list" => {
             val uri = new URI(command.trim)
             val fs = FileSystem.get(uri, spark.sparkContext.hadoopConfiguration)
-            val fileStatus = fs.globStatus(new Path(uri))
+            val fileStatus = fs.listStatus(new Path(uri))
             val df = fileStatus.map { file =>
               FileDisplay(
-                file.getPath.getParent.toString,
+                Option(file.getPath.getParent).getOrElse("/").toString,
                 file.getPath.getName,
                 Timestamp.from(Instant.ofEpochMilli(file.getModificationTime)),
                 if (!file.isDirectory) FileUtils.byteCountToDisplaySize(file.getLen) else "",
@@ -666,7 +666,9 @@ final class ArcInterpreter extends Interpreter {
     } catch {
       case e: Exception => {
         removeListener(spark, executionListener, true)(outputHandler)
-        ExecuteResult.Error(e.getMessage)
+        val exceptionThrowables = ExceptionUtils.getThrowableList(e).asScala
+        val exceptionThrowablesMessages = exceptionThrowables.map(e => e.getMessage).mkString("\n")
+        ExecuteResult.Error(exceptionThrowablesMessages)
       }
     }
   }

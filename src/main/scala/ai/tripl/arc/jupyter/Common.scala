@@ -314,7 +314,7 @@ object Common {
   // calculate a list of all the fields including nested in a schema
   def flattenSchema(schema: StructType, parents: Seq[String] = Seq()): Seq[Seq[String]] = {
     def escape(name: String): String = {
-      if (name.indexOf(" ") == -1) name else s"`$name`"
+      if (name.indexOf(" ") == -1 && name.indexOf(".") == -1 && name.indexOf("/") == -1) name else s"`$name`"
     }
 
     schema.fields.flatMap {
@@ -333,103 +333,99 @@ object Common {
     documentation: String
   )
 
+  // memoize so as to not have to reload each time
+  var pluginCompletions: List[Completer] = List.empty
+  val jupyterCompletions = Seq(
+    Completer(
+      "%sql",
+      "transform",
+      """%sql name="sqltransform" outputView=outputView environments=production,test
+      |SELECT
+      |  *
+      |FROM inputView""".stripMargin,
+      "sql",
+      "https://arc.tripl.ai/transform/#sqltransform"
+    ),
+    Completer(
+      "%log",
+      "execute",
+      """%log name="log" environments=production,test
+      |SELECT
+      |  TO_JSON(
+      |    NAMED_STRUCT(
+      |      'key', 'value'
+      |    )
+      |  ) AS message""".stripMargin,
+      "sql",
+      "https://arc.tripl.ai/execute/#logexecute"
+    ),
+    Completer(
+      "%sqlvalidate",
+      "validate",
+      """%sqlvalidate name="sqlvalidate" environments=production,test
+      |SELECT
+      |  TRUE AS valid
+      |  ,TO_JSON(
+      |    NAMED_STRUCT(
+      |      'key', 'value'
+      |    )
+      |  ) AS message""".stripMargin,
+      "sql",
+      "https://arc.tripl.ai/validate/#sqlvalidate"
+    )
+  )
+
   // todo: these should come from traits in arc
   def getCompletions(pos: Int, length: Int)(implicit spark: SparkSession, arcContext: ARCContext): Completion = {
     import spark.implicits._
 
-    if (arcContext == null) {
-      Completion.empty(pos)
+    // progressively enable additional completions as the arcContext becomes available
+    val completions = if (arcContext == null) {
+      jupyterCompletions
     } else {
-      val pluginCompletions = arcContext.pipelineStagePlugins.flatMap { stage =>
-        stage match {
-          case s: JupyterCompleter => Option(
-            Completer(
-              s.getClass.getSimpleName,
-              s.getClass.getPackage.getName.split("\\.").last,
-              s.snippet,
-              s.mimetype,
-              s.documentationURI.toString
+      // only resolve plugins once
+      if (pluginCompletions.length == 0) {
+        pluginCompletions = arcContext.pipelineStagePlugins.flatMap { stage =>
+          stage match {
+            case s: JupyterCompleter => Option(
+              Completer(
+                s.getClass.getSimpleName,
+                s.getClass.getPackage.getName.split("\\.").last,
+                s.snippet,
+                s.mimetype,
+                s.documentationURI.toString
+              )
             )
-          )
-          case _ => None
+            case _ => None
+          }
         }
       }
 
-      val jupyterCompletions = Seq(
-        Completer(
-          "%sql",
-          "transform",
-          """%sql name="sqltransform" outputView=outputView environments=production,test
-          |SELECT
-          |  *
-          |FROM inputView""".stripMargin,
-          "sql",
-          "https://arc.tripl.ai/transform/#sqltransform"
-        ),
-        Completer(
-          "%log",
-          "execute",
-          """%log name="log" environments=production,test
-          |SELECT
-          |  TO_JSON(
-          |    NAMED_STRUCT(
-          |      'key', 'value'
-          |    )
-          |  ) AS message""".stripMargin,
-          "sql",
-          "https://arc.tripl.ai/execute/#logexecute"
-        ),
-        Completer(
-          "%sqlvalidate",
-          "validate",
-          """%sqlvalidate name="sqlvalidate" environments=production,test
-          |SELECT
-          |  TRUE AS valid
-          |  ,TO_JSON(
-          |    NAMED_STRUCT(
-          |      'key', 'value'
-          |    )
-          |  ) AS message""".stripMargin,
-          "sql",
-          "https://arc.tripl.ai/validate/#sqlvalidate"
-        )
-      )
-
-      val tableCompletions = spark.catalog.listTables.map(_.name).collect.map { name =>
-        val df = spark.table(name)
-        val fields = flattenSchema(df.schema).map { _.mkString(".") }
-        Completer(
-          s"%sql ${name}",
-          "transform",
-          s"""%sql name="${name}" outputView=outputView environments=production,test
-          |SELECT
-          |${fields.mkString("  ", "\n  ,", "")}
-          |FROM ${name}""".stripMargin,
-          "sql",
-          "https://arc.tripl.ai/transform/#sqltransform"
-        )
+      // add any registered tables (see OutputTable for registration)
+      if (arcContext.userData.contains("tableCompletions")) {
+        val tableCompletions = arcContext.userData.get("tableCompletions").get.asInstanceOf[List[Completer]]
+        (pluginCompletions ++ jupyterCompletions ++ tableCompletions)
+      } else {
+        (pluginCompletions ++ jupyterCompletions)
       }
-
-
-      val completions = (pluginCompletions ++ jupyterCompletions ++ tableCompletions)
-
-      val objectMapper = new ObjectMapper()
-      val jsonNodeFactory = new JsonNodeFactory(true)
-      val node = jsonNodeFactory.objectNode
-      val jupyterTypesArray = node.putArray("_jupyter_types_experimental")
-      completions.foreach { completion =>
-        val completionNode = jsonNodeFactory.objectNode
-        completionNode.set("text", jsonNodeFactory.textNode(completion.text))
-        completionNode.set("type", jsonNodeFactory.textNode(completion.textType))
-        completionNode.set("replaceText", jsonNodeFactory.textNode(completion.replaceText))
-        completionNode.set("language", jsonNodeFactory.textNode(completion.language))
-        completionNode.set("documentation", jsonNodeFactory.textNode(completion.documentation))
-        completionNode.set("sortBy", jsonNodeFactory.textNode(s"${completion.textType}:${completion.text}"))
-        jupyterTypesArray.add(completionNode)
-      }
-
-      almond.interpreter.Completion(0, length, completions.map(_.text),  RawJson(objectMapper.writeValueAsString(node).getBytes(StandardCharsets.UTF_8)))
     }
+
+    val objectMapper = new ObjectMapper()
+    val jsonNodeFactory = new JsonNodeFactory(true)
+    val node = jsonNodeFactory.objectNode
+    val jupyterTypesArray = node.putArray("_jupyter_types_experimental")
+    completions.foreach { completion =>
+      val completionNode = jsonNodeFactory.objectNode
+      completionNode.set("text", jsonNodeFactory.textNode(completion.text))
+      completionNode.set("type", jsonNodeFactory.textNode(completion.textType))
+      completionNode.set("replaceText", jsonNodeFactory.textNode(completion.replaceText))
+      completionNode.set("language", jsonNodeFactory.textNode(completion.language))
+      completionNode.set("documentation", jsonNodeFactory.textNode(completion.documentation))
+      completionNode.set("sortBy", jsonNodeFactory.textNode(s"${completion.textType}:${completion.text}"))
+      jupyterTypesArray.add(completionNode)
+    }
+
+    almond.interpreter.Completion(0, length, completions.map(_.text),  RawJson(objectMapper.writeValueAsString(node).getBytes(StandardCharsets.UTF_8)))
   }
 
   // This function comes from the Apahce Spark org.apache.spark.util.Utils private class
