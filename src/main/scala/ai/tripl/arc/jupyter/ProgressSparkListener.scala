@@ -153,7 +153,8 @@ final class ProgressSparkListener(progressBarId: String)(implicit outputHandler:
         if (error) {
           outputHandler.updateHtml(
             s"""<div class="progress">
-                |  <div class="progress-bar-danger" style="width: 100%;">${statusText}</div>
+                |  <div class="progress-bar-danger" style="width: 100%;"></div>
+                |  <div class="progress-bar-status">${statusText}</div>
                 |</div>
                 |""".stripMargin,
             progressBarId
@@ -161,7 +162,8 @@ final class ProgressSparkListener(progressBarId: String)(implicit outputHandler:
         } else {
           outputHandler.updateHtml(
             s"""<div class="progress">
-                |  <div class="progress-bar-success" style="width: 100%;">${statusText}</div>
+                |  <div class="progress-bar-success" style="width: 100%;"></div>
+                |  <div class="progress-bar-status">${statusText}</div>
                 |</div>
                 |""".stripMargin,
             progressBarId
@@ -170,8 +172,9 @@ final class ProgressSparkListener(progressBarId: String)(implicit outputHandler:
       } else {
         outputHandler.updateHtml(
           s"""<div class="progress">
-              |  <div class="progress-bar-success" style="width: ${if (!donePct.isNaN) donePct else 100}%;">${statusText}</div>
+              |  <div class="progress-bar-success" style="width: ${if (!donePct.isNaN) donePct else 100}%;"></div>
               |  <div class="progress-bar-info" style="width: ${if (!runningPct.isNaN) runningPct else 0}%;"></div>
+              |  <div class="progress-bar-status">${statusText}</div>
               |</div>
               |""".stripMargin,
           progressBarId

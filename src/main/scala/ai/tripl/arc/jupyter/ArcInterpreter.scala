@@ -45,7 +45,6 @@ import ai.tripl.arc.util.MetadataUtils
 import ai.tripl.arc.util.SerializableConfiguration
 import ai.tripl.arc.util.SQLUtils
 
-
 case class ConfigValue (
   secret: Boolean,
   value: String
@@ -377,6 +376,7 @@ final class ArcInterpreter extends Interpreter {
           commandLineArguments=confCommandLineArgs.map { case (key, config) => (key, config.value) },
           storageLevel=StorageLevel.MEMORY_AND_DISK_SER,
           immutableViews=false,
+          dropUnsupported=false,
           dynamicConfigurationPlugins=dynamicConfigsPlugins,
           lifecyclePlugins=lifecyclePlugins,
           activeLifecyclePlugins=Nil,
