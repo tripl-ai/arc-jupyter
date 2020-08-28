@@ -90,7 +90,7 @@ final class ProgressSparkListener(progressBarId: String)(implicit outputHandler:
 
   def init()(implicit outputHandler: OutputHandler): Unit = {
     outputHandler.html(
-      s"""<div class="progress">0/0</div>""",
+      s"""<div class="progress"><div class="progress-bar-status">0/0</div></div>""".stripMargin,
       progressBarId
     )
 
