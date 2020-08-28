@@ -9,7 +9,7 @@ object Dependencies {
   val sparkHive = "org.apache.spark" %% "spark-hive" % sparkVersion % "provided"
   val sparkMl = "org.apache.spark" %% "spark-mllib" % sparkVersion % "provided"
 
-  val kernel = "sh.almond" %% "kernel" % "0.10.5"
+  val kernel = "sh.almond" %% "kernel" % "0.10.6"
 
   val arc = "ai.tripl" %% "arc" % "3.2.0" % "provided"
 
