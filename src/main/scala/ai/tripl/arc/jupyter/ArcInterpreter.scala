@@ -228,6 +228,7 @@ final class ArcInterpreter extends Interpreter {
         val lines = code.trim.split("\n")
         val (interpreter, commandArgs, command, deregister) = lines(0) match {
           case x if x.startsWith("%arc") => ("arc", parseArgs(lines(0)), lines.drop(1).mkString("\n"), None)
+          // outputs which may have outputView
           case x if (x.startsWith("%sql") && !x.startsWith("%sqlvalidate")) || x.startsWith("%metadatafilter") => {
             val commandArgs = parseArgs(lines(0))
             commandArgs.get("outputView") match {
@@ -237,6 +238,10 @@ final class ArcInterpreter extends Interpreter {
               }
               case Some(_) => ("arc", commandArgs, lines.mkString("\n"), None)
             }
+          }
+          case x if x.startsWith("%metadatavalidate") || x.startsWith("%sqlvalidate") => {
+            val commandArgs = parseArgs(lines(0))
+            ("arc", commandArgs, lines.mkString("\n"), None)
           }
           case x if (x.startsWith("%configplugin")) => {
             ("configplugin", parseArgs(lines(0)), lines.drop(1).mkString("\n"), None)

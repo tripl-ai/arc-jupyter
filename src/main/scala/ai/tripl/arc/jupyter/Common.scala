@@ -312,10 +312,10 @@ object Common {
   def randStr(n:Int) = (1 to n).map(x => alpha(secureRandom.nextInt.abs % size)).mkString
 
   // calculate a list of all the fields including nested in a schema
-  val notAlphanumeric = "([^abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789])".r
+  val notAllowed = "([^abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_])".r
   def flattenSchema(schema: StructType, parents: Seq[String] = Seq()): Seq[Seq[String]] = {
     def escape(name: String): String = {
-      if (notAlphanumeric.findFirstMatchIn(name).isEmpty) name else s"`$name`"
+      if (notAllowed.findFirstMatchIn(name).isEmpty) name else s"`$name`"
     }
 
     schema.fields.flatMap {
@@ -364,7 +364,7 @@ object Common {
     Completer(
       "%metadatavalidate",
       "validate",
-      """%metadatavalidate name="metadatavalidate" environments=production,test
+      """%metadatavalidate name="metadatavalidate" inputView=inputView environments=production,test
       |SELECT
       |  TRUE AS valid
       |  ,TO_JSON(
