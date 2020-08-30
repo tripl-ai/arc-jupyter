@@ -337,16 +337,7 @@ object Common {
   // memoize so as to not have to reload each time
   var pluginCompletions: List[Completer] = List.empty
   val jupyterCompletions = Seq(
-    Completer(
-      "%sql",
-      "transform",
-      """%sql name="sqltransform" outputView=outputView environments=production,test
-      |SELECT
-      |  *
-      |FROM inputView""".stripMargin,
-      "sql",
-      "https://arc.tripl.ai/transform/#sqltransform"
-    ),
+
     Completer(
       "%log",
       "execute",
@@ -359,6 +350,40 @@ object Common {
       |  ) AS message""".stripMargin,
       "sql",
       "https://arc.tripl.ai/execute/#logexecute"
+    ),
+    Completer(
+      "%metadatafilter",
+      "transform",
+      """%metadatafilter name="metadatafiltertransform" inputView=inputView outputView=outputView environments=production,test
+      |SELECT
+      |  *
+      |FROM metadata""".stripMargin,
+      "sql",
+      "https://arc.tripl.ai/transform/#metadatafiltertransform"
+    ),
+    Completer(
+      "%metadatavalidate",
+      "validate",
+      """%metadatavalidate name="metadatavalidate" environments=production,test
+      |SELECT
+      |  TRUE AS valid
+      |  ,TO_JSON(
+      |    NAMED_STRUCT(
+      |      'key', 'value'
+      |    )
+      |  ) AS message""".stripMargin,
+      "sql",
+      "https://arc.tripl.ai/validate/#metadatavalidate"
+    ),
+    Completer(
+      "%sql",
+      "transform",
+      """%sql name="sqltransform" outputView=outputView environments=production,test
+      |SELECT
+      |  *
+      |FROM inputView""".stripMargin,
+      "sql",
+      "https://arc.tripl.ai/transform/#sqltransform"
     ),
     Completer(
       "%sqlvalidate",

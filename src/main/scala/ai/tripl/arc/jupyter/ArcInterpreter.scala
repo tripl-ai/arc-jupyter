@@ -38,7 +38,7 @@ import com.typesafe.config._
 
 import ai.tripl.arc.api.API.ARCContext
 import ai.tripl.arc.ARC
-import ai.tripl.arc.config.ArcPipeline
+import ai.tripl.arc.config.{ArcPipeline, ConfigUtils}
 import ai.tripl.arc.plugins._
 import ai.tripl.arc.util.log.LoggerFactory
 import ai.tripl.arc.util.MetadataUtils
@@ -227,63 +227,16 @@ final class ArcInterpreter extends Interpreter {
         // parse input
         val lines = code.trim.split("\n")
         val (interpreter, commandArgs, command, deregister) = lines(0) match {
-          case x if (x.startsWith("%arc")) => {
-            ("arc", parseArgs(lines(0)), lines.drop(1).mkString("\n"), None)
-          }
-          case x if (x.startsWith("%sql") || x.startsWith("%log")) => {
+          case x if x.startsWith("%arc") => ("arc", parseArgs(lines(0)), lines.drop(1).mkString("\n"), None)
+          case x if (x.startsWith("%sql") && !x.startsWith("%sqlvalidate")) || x.startsWith("%metadatafilter") => {
             val commandArgs = parseArgs(lines(0))
-            var name = commandArgs.get("name") match {
-              case Some(name) =>
-                s"""${if (!name.startsWith("\"")) "\"" else ""}$name${if (!name.endsWith("\"")) "\"" else ""}"""
-              case None => "\"\""
-            }
-            val description = commandArgs.get("description") match {
-              case Some(description) => description
-              case None => ""
-            }
-            val envParams = confCommandLineArgs.map { case (key, config) => (key, config.value) }
-            val sqlParams = commandArgs.get("sqlParams") match {
-              case Some(sqlParams) => parseArgs(Common.injectParameters(sqlParams.replace(",", " "), envParams))
-              case None => Map[String, String]()
-            }
-            val params = envParams ++ sqlParams
-            val stmt = SQLUtils.injectParameters(lines.drop(1).mkString("\n"), params, true)
-            val rnd = Common.randStr(32)
-            ("arc", parseArgs(lines(0)),
-              lines(0) match {
-                case x if x.startsWith("%sqlvalidate") =>
-                  s"""{
-                    |  "type": "SQLValidate",
-                    |  "name": ${name},
-                    |  "description": "${description}",
-                    |  "environments": [],
-                    |  "sql": \"\"\"${stmt}\"\"\",
-                    |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "numRows", "truncate", "persist", "monospace", "leftAlign", "datasetLabels", "streamingDuration").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
-                    |}""".stripMargin
-                case x if x.startsWith("%sql") =>
-                  s"""{
-                    |  "type": "SQLTransform",
-                    |  "name": ${name},
-                    |  "description": "${description}",
-                    |  "environments": [],
-                    |  "sql": \"\"\"${stmt}\"\"\",
-                    |  "outputView": "${commandArgs.getOrElse("outputView", rnd)}",
-                    |  "persist": ${commandArgs.getOrElse("persist", "false")},
-                    |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "outputView", "numRows", "truncate", "persist", "monospace", "leftAlign", "datasetLabels", "streamingDuration").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
-                    |}""".stripMargin
-                case x if x.startsWith("%log") =>
-                  s"""{
-                    |  "type": "LogExecute",
-                    |  "name": ${name},
-                    |  "description": "${description}",
-                    |  "environments": [],
-                    |  "sql": \"\"\"${stmt}\"\"\",
-                    |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "numRows", "truncate", "persist", "monospace", "leftAlign", "datasetLabels", "streamingDuration").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
-                    |}""".stripMargin
-                case _ => ""
+            commandArgs.get("outputView") match {
+              case None => {
+                val rnd = Common.randStr(32)
+                ("arc", commandArgs, s"""${lines(0)} outputView=${rnd}\n${lines.drop(1).mkString("\n")}""", Option(rnd))
               }
-              ,Option(rnd)
-            )
+              case Some(_) => ("arc", commandArgs, lines.mkString("\n"), None)
+            }
           }
           case x if (x.startsWith("%configplugin")) => {
             ("configplugin", parseArgs(lines(0)), lines.drop(1).mkString("\n"), None)
@@ -416,6 +369,9 @@ final class ArcInterpreter extends Interpreter {
             secretPattern.findFirstIn(command) match {
               case Some(_) => ExecuteResult.Error("Secret found in input. Use %secret to define to prevent accidental leaks.")
               case None => {
+                val (_, _, stages) = ConfigUtils.parseIPYNBCells(List(command))
+
+                print(stages)
                 val pipelineEither = ArcPipeline.parseConfig(Left(
                   s"""{
                     "plugins": {
@@ -430,7 +386,7 @@ final class ArcInterpreter extends Interpreter {
                         }
                       ]
                     },
-                    "stages": [${command}]
+                    "stages": [${stages}]
                   }""")
                   , arcContext)
 

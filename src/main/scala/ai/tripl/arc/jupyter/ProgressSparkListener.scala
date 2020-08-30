@@ -18,7 +18,7 @@ import scala.util.Try
 
 final class ProgressSparkListener(progressBarId: String)(implicit outputHandler: OutputHandler, logger: Logger) extends SparkListener {
 
-  val rateLimitMs = 250
+  val rateLimitMs = 500
 
   val numTasks = new AtomicInteger
   val startedTasks = new AtomicInteger
