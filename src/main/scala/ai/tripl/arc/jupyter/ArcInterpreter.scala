@@ -375,8 +375,6 @@ final class ArcInterpreter extends Interpreter {
               case Some(_) => ExecuteResult.Error("Secret found in input. Use %secret to define to prevent accidental leaks.")
               case None => {
                 val (_, _, stages) = ConfigUtils.parseIPYNBCells(List(command))
-
-                print(stages)
                 val pipelineEither = ArcPipeline.parseConfig(Left(
                   s"""{
                     "plugins": {
@@ -464,7 +462,7 @@ final class ArcInterpreter extends Interpreter {
             }
             if (persist) df.persist(StorageLevel.MEMORY_AND_DISK_SER)
             ExecuteResult.Success(
-              DisplayData.html(Common.renderHTML(df, None, numRows, truncate, monospace, leftAlign, datasetLabels))
+              DisplayData.html(Common.renderHTML(df, None, Int.MaxValue, truncate, monospace, leftAlign, datasetLabels))
             )
           }
           case "printmetadata" => {
