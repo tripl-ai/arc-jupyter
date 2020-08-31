@@ -81,7 +81,7 @@ final class ArcInterpreter extends Interpreter {
   var confMonospace = Try(envOrNone("CONF_DISPLAY_MONOSPACE").get.toBoolean).getOrElse(false)
   var confLeftAlign = Try(envOrNone("CONF_DISPLAY_LEFT_ALIGN").get.toBoolean).getOrElse(false)
   var confDatasetLabels = Try(envOrNone("CONF_DISPLAY_DATASET_LABELS").get.toBoolean).getOrElse(false)
-  var confExtendedErrors = Try(envOrNone("CONF_DISPLAY_EXTENDED_ERRORS").get.toBoolean).getOrElse(false)
+  var confExtendedErrors = Try(envOrNone("CONF_DISPLAY_EXTENDED_ERRORS").get.toBoolean).getOrElse(true)
   var policyInlineSQL = Try(envOrNone("ETL_POLICY_INLINE_SQL").get.toBoolean).getOrElse(true)
   var policyInlineSchema = Try(envOrNone("ETL_POLICY_INLINE_SCHEMA").get.toBoolean).getOrElse(true)
   var confStreaming = false
