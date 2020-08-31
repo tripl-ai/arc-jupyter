@@ -366,12 +366,18 @@ object Common {
       "validate",
       """%metadatavalidate name="metadatavalidate" inputView=inputView environments=production,test
       |SELECT
-      |  TRUE AS valid
+      |  SUM(test) = 0
       |  ,TO_JSON(
       |    NAMED_STRUCT(
-      |      'key', 'value'
+      |      'columns', COUNT(*),
+      |      'test', SUM(test)
       |    )
-      |  ) AS message""".stripMargin,
+      |  )
+      |FROM (
+      |  SELECT
+      |    CASE WHEN TRUE THEN 1 ELSE 0 END AS test
+      |  FROM metadata
+      |) valid""".stripMargin,
       "sql",
       "https://arc.tripl.ai/validate/#metadatavalidate"
     ),
