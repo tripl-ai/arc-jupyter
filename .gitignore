@@ -9,6 +9,7 @@ spark-warehouse
 metals.sbt
 .bloop/
 .ivy2/
+.vscode
 local/
 target/
 project/project

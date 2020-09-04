@@ -57,6 +57,8 @@ case class OutputTablePlugin (
   ) extends LifecyclePluginInstance {
 
   override def after(result: Option[DataFrame], stage: PipelineStage, index: Int, stages: List[PipelineStage])(implicit spark: SparkSession, logger: ai.tripl.arc.util.log.logger.Logger, arcContext: ARCContext): Option[DataFrame] = {
+    import spark.implicits._
+
     // do not print the last stage as it will be printed by the interpreter
     val isLast = index == stages.length - 1
     if (!isLast) {
@@ -85,6 +87,23 @@ case class OutputTablePlugin (
         }
         case _ => arcContext.userData.remove("lastView")
       }
+
+      // dynamically create sql statements for all tables in the catalog
+      val tableCompletions = spark.catalog.listTables.map(_.name).collect.map { name =>
+        val df = spark.table(name)
+        val fields = Common.flattenSchema(df.schema).map { _.mkString(".") }
+        Common.Completer(
+          s"%sql ${name}",
+          "transform",
+          s"""%sql name="${name}" outputView=outputView environments=production,test
+          |SELECT
+          |${fields.mkString("  ", "\n  ,", "")}
+          |FROM ${name}""".stripMargin,
+          "sql",
+          "https://arc.tripl.ai/transform/#sqltransform"
+        )
+      }.toList
+      arcContext.userData.put("tableCompletions", tableCompletions)
     }
 
     result
