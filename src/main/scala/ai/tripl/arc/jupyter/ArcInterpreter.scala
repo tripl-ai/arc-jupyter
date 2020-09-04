@@ -32,17 +32,18 @@ import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
 import org.apache.spark.storage.StorageLevel
 
+import org.apache.commons.lang3.exception.ExceptionUtils
+
 import com.typesafe.config._
 
 import ai.tripl.arc.api.API.ARCContext
 import ai.tripl.arc.ARC
-import ai.tripl.arc.config.ArcPipeline
+import ai.tripl.arc.config.{ArcPipeline, ConfigUtils}
 import ai.tripl.arc.plugins._
 import ai.tripl.arc.util.log.LoggerFactory
 import ai.tripl.arc.util.MetadataUtils
 import ai.tripl.arc.util.SerializableConfiguration
 import ai.tripl.arc.util.SQLUtils
-
 
 case class ConfigValue (
   secret: Boolean,
@@ -62,9 +63,6 @@ final class ArcInterpreter extends Interpreter {
   implicit var spark: SparkSession = _
   implicit var arcContext: ARCContext = _
 
-  Logger.getLogger("org").setLevel(Level.ERROR)
-  Logger.getLogger("breeze").setLevel(Level.ERROR)
-
   // the memory available to the container (i.e. the docker memory limit)
   val physicalMemory = ManagementFactory.getOperatingSystemMXBean.asInstanceOf[com.sun.management.OperatingSystemMXBean].getTotalPhysicalMemorySize
   // the JVM requested memory (-Xmx)
@@ -83,6 +81,9 @@ final class ArcInterpreter extends Interpreter {
   var confMonospace = Try(envOrNone("CONF_DISPLAY_MONOSPACE").get.toBoolean).getOrElse(false)
   var confLeftAlign = Try(envOrNone("CONF_DISPLAY_LEFT_ALIGN").get.toBoolean).getOrElse(false)
   var confDatasetLabels = Try(envOrNone("CONF_DISPLAY_DATASET_LABELS").get.toBoolean).getOrElse(false)
+  var confExtendedErrors = Try(envOrNone("CONF_DISPLAY_EXTENDED_ERRORS").get.toBoolean).getOrElse(true)
+  var policyInlineSQL = Try(envOrNone("ETL_POLICY_INLINE_SQL").get.toBoolean).getOrElse(true)
+  var policyInlineSchema = Try(envOrNone("ETL_POLICY_INLINE_SCHEMA").get.toBoolean).getOrElse(true)
   var confStreaming = false
   var udfsRegistered = false
 
@@ -119,14 +120,12 @@ final class ArcInterpreter extends Interpreter {
 
   override def asyncComplete(code: String, pos: Int): Option[CancellableFuture[Completion]] = {
     val spaceIndex = code.indexOf(" ")
-    val res = if (spaceIndex == -1 || (pos < spaceIndex)){
+    if (spaceIndex == -1 || (pos < spaceIndex)){
       val c = Common.getCompletions(pos, code.length)
-      CancellableFuture(Future.successful(c), () => sys.error("should not happen"))
+      Some(CancellableFuture(Future.successful(c), () => sys.error("should not happen")))
     } else {
-      val c = Completion.empty(pos)
-      CancellableFuture(Future.successful(c), () => sys.error("should not happen"))
+      None
     }
-    Some(res)
   }
 
   def startSession(): SparkSession = {
@@ -186,6 +185,8 @@ final class ArcInterpreter extends Interpreter {
         .field("javaVersion", System.getProperty("java.runtime.version"))
         .field("runtimeMemory", s"${runtimeMemory}B")
         .field("physicalMemory", s"${physicalMemory}B")
+        .field("policyInlineSQL", policyInlineSQL.toString)
+        .field("policyInlineSchema", policyInlineSchema.toString)
         .log()
 
       // only set default aws provider override if not provided
@@ -226,63 +227,21 @@ final class ArcInterpreter extends Interpreter {
         // parse input
         val lines = code.trim.split("\n")
         val (interpreter, commandArgs, command, deregister) = lines(0) match {
-          case x if (x.startsWith("%arc")) => {
-            ("arc", parseArgs(lines(0)), lines.drop(1).mkString("\n"), None)
-          }
-          case x if (x.startsWith("%sql") || x.startsWith("%log")) => {
+          case x if x.startsWith("%arc") => ("arc", parseArgs(lines(0)), lines.drop(1).mkString("\n"), None)
+          // outputs which may have outputView
+          case x if (x.startsWith("%sql") && !x.startsWith("%sqlvalidate")) || x.startsWith("%metadatafilter") => {
             val commandArgs = parseArgs(lines(0))
-            var name = commandArgs.get("name") match {
-              case Some(name) =>
-                s"""${if (!name.startsWith("\"")) "\"" else ""}$name${if (!name.endsWith("\"")) "\"" else ""}"""
-              case None => "\"\""
-            }
-            val description = commandArgs.get("description") match {
-              case Some(description) => description
-              case None => ""
-            }
-            val envParams = confCommandLineArgs.map { case (key, config) => (key, config.value) }
-            val sqlParams = commandArgs.get("sqlParams") match {
-              case Some(sqlParams) => parseArgs(Common.injectParameters(sqlParams.replace(",", " "), envParams))
-              case None => Map[String, String]()
-            }
-            val params = envParams ++ sqlParams
-            val stmt = SQLUtils.injectParameters(lines.drop(1).mkString("\n"), params, true)
-            val rnd = Common.randStr(32)
-            ("arc", parseArgs(lines(0)),
-              lines(0) match {
-                case x if x.startsWith("%sqlvalidate") =>
-                  s"""{
-                    |  "type": "SQLValidate",
-                    |  "name": ${name},
-                    |  "description": "${description}",
-                    |  "environments": [],
-                    |  "sql": \"\"\"${stmt}\"\"\",
-                    |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "numRows", "truncate", "persist", "monospace", "leftAlign", "datasetLabels", "streamingDuration").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
-                    |}""".stripMargin
-                case x if x.startsWith("%sql") =>
-                  s"""{
-                    |  "type": "SQLTransform",
-                    |  "name": ${name},
-                    |  "description": "${description}",
-                    |  "environments": [],
-                    |  "sql": \"\"\"${stmt}\"\"\",
-                    |  "outputView": "${commandArgs.getOrElse("outputView", rnd)}",
-                    |  "persist": ${commandArgs.getOrElse("persist", "false")},
-                    |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "outputView", "numRows", "truncate", "persist", "monospace", "leftAlign", "datasetLabels", "streamingDuration").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
-                    |}""".stripMargin
-                case x if x.startsWith("%log") =>
-                  s"""{
-                    |  "type": "LogExecute",
-                    |  "name": ${name},
-                    |  "description": "${description}",
-                    |  "environments": [],
-                    |  "sql": \"\"\"${stmt}\"\"\",
-                    |  ${commandArgs.filterKeys{ !List("name", "description", "sqlParams", "environments", "numRows", "truncate", "persist", "monospace", "leftAlign", "datasetLabels", "streamingDuration").contains(_) }.map{ case (k, v) => s""""${k}": "${v}""""}.mkString(",")}
-                    |}""".stripMargin
-                case _ => ""
+            commandArgs.get("outputView") match {
+              case None => {
+                val rnd = Common.randStr(32)
+                ("arc", commandArgs, s"""${lines(0)} outputView=${rnd}\n${lines.drop(1).mkString("\n")}""", Option(rnd))
               }
-              ,Option(rnd)
-            )
+              case Some(_) => ("arc", commandArgs, lines.mkString("\n"), None)
+            }
+          }
+          case x if x.startsWith("%metadatavalidate") || x.startsWith("%sqlvalidate") => {
+            val commandArgs = parseArgs(lines(0))
+            ("arc", commandArgs, lines.mkString("\n"), None)
           }
           case x if (x.startsWith("%configplugin")) => {
             ("configplugin", parseArgs(lines(0)), lines.drop(1).mkString("\n"), None)
@@ -369,20 +328,23 @@ final class ArcInterpreter extends Interpreter {
           jobId=None,
           jobName=None,
           environment=None,
-          environmentId=None,
           configUri=None,
           isStreaming=confStreaming,
           ignoreEnvironments=true,
           commandLineArguments=confCommandLineArgs.map { case (key, config) => (key, config.value) },
           storageLevel=StorageLevel.MEMORY_AND_DISK_SER,
           immutableViews=false,
+          dropUnsupported=false,
           dynamicConfigurationPlugins=dynamicConfigsPlugins,
           lifecyclePlugins=lifecyclePlugins,
           activeLifecyclePlugins=Nil,
           pipelineStagePlugins=pipelineStagePlugins,
           udfPlugins=udfPlugins,
           serializableConfiguration=new SerializableConfiguration(spark.sparkContext.hadoopConfiguration),
-          userData=memoizedUserData
+          userData=memoizedUserData,
+          ipynb=true,
+          inlineSchema=policyInlineSchema,
+          inlineSQL=policyInlineSQL,
         )
 
         // register udfs once
@@ -412,6 +374,7 @@ final class ArcInterpreter extends Interpreter {
             secretPattern.findFirstIn(command) match {
               case Some(_) => ExecuteResult.Error("Secret found in input. Use %secret to define to prevent accidental leaks.")
               case None => {
+                val (_, _, stages) = ConfigUtils.parseIPYNBCells(List(command))
                 val pipelineEither = ArcPipeline.parseConfig(Left(
                   s"""{
                     "plugins": {
@@ -426,7 +389,7 @@ final class ArcInterpreter extends Interpreter {
                         }
                       ]
                     },
-                    "stages": [${command}]
+                    "stages": [${stages}]
                   }""")
                   , arcContext)
 
@@ -456,7 +419,7 @@ final class ArcInterpreter extends Interpreter {
                             result
                           }
                           case None => {
-                            ExecuteResult.Success(DisplayData.text("No result."))
+                            ExecuteResult.Success(DisplayData.text("Success. No result."))
                           }
                         }
                       }
@@ -499,7 +462,7 @@ final class ArcInterpreter extends Interpreter {
             }
             if (persist) df.persist(StorageLevel.MEMORY_AND_DISK_SER)
             ExecuteResult.Success(
-              DisplayData.html(Common.renderHTML(df, None, numRows, truncate, monospace, leftAlign, datasetLabels))
+              DisplayData.html(Common.renderHTML(df, None, Int.MaxValue, truncate, monospace, leftAlign, datasetLabels))
             )
           }
           case "printmetadata" => {
@@ -545,60 +508,15 @@ final class ArcInterpreter extends Interpreter {
               }
               case None =>
             }
-            if (confNumRows != numRows) confNumRows = numRows
-            if (confTruncate != truncate) confTruncate = truncate
-            commandArgs.get("streaming") match {
-              case Some(streaming) => {
-                try {
-                  val streamingValue = streaming.toBoolean
-                  confStreaming = streamingValue
-                } catch {
-                  case e: Exception =>
-                }
-              }
-              case None =>
-            }
-            commandArgs.get("monospace") match {
-              case Some(monospace) => {
-                try {
-                  confMonospace = monospace.toBoolean
-                } catch {
-                  case e: Exception =>
-                }
-              }
-              case None =>
-            }
-            commandArgs.get("leftAlign") match {
-              case Some(leftAlign) => {
-                try {
-                  confLeftAlign = leftAlign.toBoolean
-                } catch {
-                  case e: Exception =>
-                }
-              }
-              case None =>
-            }
-            commandArgs.get("datasetLabels") match {
-              case Some(datasetLabels) => {
-                try {
-                  confDatasetLabels = datasetLabels.toBoolean
-                } catch {
-                  case e: Exception =>
-                }
-              }
-              case None =>
-            }
-            commandArgs.get("streamingDuration") match {
-              case Some(streamingDuration) => {
-                try {
-                  val streamingDurationValue = streamingDuration.toInt
-                  confStreamingDuration = streamingDurationValue
-                } catch {
-                  case e: Exception =>
-                }
-              }
-              case None =>
-            }
+            confNumRows = Try(commandArgs.get("numRows").get.toInt).getOrElse(confNumRows)
+            confTruncate = Try(commandArgs.get("truncate").get.toInt).getOrElse(confTruncate)
+            confStreaming = Try(commandArgs.get("streaming").get.toBoolean).getOrElse(confStreaming)
+            confStreamingDuration = Try(commandArgs.get("streamingDuration").get.toInt).getOrElse(confStreamingDuration)
+            confMonospace = Try(commandArgs.get("monospace").get.toBoolean).getOrElse(confMonospace)
+            confLeftAlign = Try(commandArgs.get("leftAlign").get.toBoolean).getOrElse(confLeftAlign)
+            confDatasetLabels = Try(commandArgs.get("datasetLabels").get.toBoolean).getOrElse(confDatasetLabels)
+            confExtendedErrors = Try(commandArgs.get("extendedErrors").get.toBoolean).getOrElse(confExtendedErrors)
+
             val text = s"""
             |Arc Options:
             |master: ${confMaster}
@@ -608,6 +526,7 @@ final class ArcInterpreter extends Interpreter {
             |streamingDuration: ${confStreamingDuration}
             |
             |Display Options:
+            |extendedErrors: ${confExtendedErrors}
             |datasetLabels: ${confDatasetLabels}
             |leftAlign: ${leftAlign}
             |monospace: ${confMonospace}
@@ -631,10 +550,10 @@ final class ArcInterpreter extends Interpreter {
           case "list" => {
             val uri = new URI(command.trim)
             val fs = FileSystem.get(uri, spark.sparkContext.hadoopConfiguration)
-            val fileStatus = fs.globStatus(new Path(uri))
+            val fileStatus = fs.listStatus(new Path(uri))
             val df = fileStatus.map { file =>
               FileDisplay(
-                file.getPath.getParent.toString,
+                Option(file.getPath.getParent).getOrElse("/").toString,
                 file.getPath.getName,
                 Timestamp.from(Instant.ofEpochMilli(file.getModificationTime)),
                 if (!file.isDirectory) FileUtils.byteCountToDisplaySize(file.getLen) else "",
@@ -663,7 +582,13 @@ final class ArcInterpreter extends Interpreter {
     } catch {
       case e: Exception => {
         removeListener(spark, executionListener, true)(outputHandler)
-        ExecuteResult.Error(e.getMessage)
+        if (confExtendedErrors) {
+          val exceptionThrowables = ExceptionUtils.getThrowableList(e).asScala
+          val exceptionThrowablesMessages = exceptionThrowables.map(e => e.getMessage).mkString("\n\n")
+          ExecuteResult.Error(exceptionThrowablesMessages)
+        } else {
+          ExecuteResult.Error(e.getMessage)
+        }
       }
     }
   }

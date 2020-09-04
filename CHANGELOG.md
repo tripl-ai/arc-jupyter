@@ -1,5 +1,11 @@
 # Change Log
 
+## 3.4.0
+
+- update ArcContext to support inline Schemas.
+- optimisation of the `Completer` to not require the Spark API as frequently.
+- change to different form of rate limited update so as to not miss events.
+
 ## 3.3.0
 
 - make completion run asyncronously so it does not have to wait for all running stages to complete before returning completions.
