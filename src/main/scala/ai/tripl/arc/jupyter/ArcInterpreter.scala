@@ -324,6 +324,20 @@ final class ArcInterpreter extends Interpreter {
           }
         }
 
+        // read storage level
+        val (storageLevel, storageLevelName) = envOrNone("CONF_STORAGE_LEVEL") match {
+          case Some(v) if v.trim.toUpperCase == "DISK_ONLY" => (StorageLevel.DISK_ONLY, "DISK_ONLY")
+          case Some(v) if v.trim.toUpperCase == "DISK_ONLY_2" => (StorageLevel.DISK_ONLY_2, "DISK_ONLY_2")
+          case Some(v) if v.trim.toUpperCase == "MEMORY_AND_DISK" => (StorageLevel.MEMORY_AND_DISK, "MEMORY_AND_DISK")
+          case Some(v) if v.trim.toUpperCase == "MEMORY_AND_DISK_2" => (StorageLevel.MEMORY_AND_DISK_2, "MEMORY_AND_DISK_2")
+          case Some(v) if v.trim.toUpperCase == "MEMORY_AND_DISK_SER" => (StorageLevel.MEMORY_AND_DISK_SER, "MEMORY_AND_DISK_SER")
+          case Some(v) if v.trim.toUpperCase == "MEMORY_AND_DISK_SER_2" => (StorageLevel.MEMORY_AND_DISK_SER_2, "MEMORY_AND_DISK_SER_2")
+          case Some(v) if v.trim.toUpperCase == "MEMORY_ONLY" => (StorageLevel.MEMORY_ONLY, "MEMORY_ONLY")
+          case Some(v) if v.trim.toUpperCase == "MEMORY_ONLY_SER" => (StorageLevel.MEMORY_ONLY_SER, "MEMORY_ONLY_SER")
+          case Some(v) if v.trim.toUpperCase == "MEMORY_ONLY_SER_2" => (StorageLevel.MEMORY_ONLY_SER_2, "MEMORY_ONLY_SER_2")
+          case _ => (StorageLevel.MEMORY_AND_DISK_SER, "MEMORY_AND_DISK_SER")
+        }
+
         arcContext = ARCContext(
           jobId=None,
           jobName=None,
@@ -332,7 +346,7 @@ final class ArcInterpreter extends Interpreter {
           isStreaming=confStreaming,
           ignoreEnvironments=true,
           commandLineArguments=confCommandLineArgs.map { case (key, config) => (key, config.value) },
-          storageLevel=StorageLevel.MEMORY_AND_DISK_SER,
+          storageLevel=storageLevel,
           immutableViews=false,
           dropUnsupported=false,
           dynamicConfigurationPlugins=dynamicConfigsPlugins,
@@ -522,6 +536,7 @@ final class ArcInterpreter extends Interpreter {
             |master: ${confMaster}
             |runtimeMemory: ${runtimeMemory}B
             |physicalMemory: ${physicalMemory}B
+            |storageLevel: ${storageLevelName}
             |streaming: ${confStreaming}
             |streamingDuration: ${confStreamingDuration}
             |
