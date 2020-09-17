@@ -1,5 +1,9 @@
 # Change Log
 
+## 3.5.0
+
+- add `CONF_STORAGE_LEVEL` to allow controlling the `persist` `storageLevel`.
+
 ## 3.4.0
 
 - update ArcContext to support inline Schemas.
