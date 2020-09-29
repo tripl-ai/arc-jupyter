@@ -1,5 +1,9 @@
 # Change Log
 
+## 3.6.0
+
+- update to Arc 3.4.0.
+
 ## 3.5.0
 
 - add `CONF_STORAGE_LEVEL` to allow controlling the `persist` `storageLevel`.
