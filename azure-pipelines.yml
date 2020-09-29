@@ -22,13 +22,13 @@ steps:
 - task: DownloadSecureFile@1
   displayName: 'Get pubring.asc from Azure Secure Library'
   inputs:
-    secureFile: "pubring.asc"    
+    secureFile: "pubring.asc"
 
 - script: |
     mkdir -p /tmp/pgp && \
     mv $(DownloadSecureFile1.secureFilePath) /tmp/pgp && \
     mv $(DownloadSecureFile2.secureFilePath) /tmp/pgp
-  displayName: 'Move pgp keys'  
+  displayName: 'Move pgp keys'
 
 - script: |
     docker-compose \
@@ -36,7 +36,7 @@ steps:
     up \
     --build \
     -d
-  displayName: 'Create a docker-compose based testing environment (including idle mozilla/sbt:8u212_1.2.8)'
+  displayName: 'Create a docker-compose based testing environment (including idle mozilla/sbt)'
 
 - script: |
     docker exec \
@@ -48,7 +48,7 @@ steps:
     docker exec \
     sbt \
     sbt "+it:test"
-  displayName: 'sbt it:test'  
+  displayName: 'sbt it:test'
 
 - script: |
     docker exec \
@@ -68,5 +68,5 @@ steps:
     sbt \
     sbt "sonatypeRelease"
   displayName: 'sbt sonatypeRelease (push to https://repo1.maven.org/maven2/ai/tripl/)'
-  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))  
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
 
