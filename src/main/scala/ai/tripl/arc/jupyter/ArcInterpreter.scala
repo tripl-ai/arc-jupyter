@@ -95,6 +95,7 @@ final class ArcInterpreter extends Interpreter {
 
   // cache userData so state can be preserved between executions
   var memoizedUserData: collection.mutable.Map[String, Object] = collection.mutable.Map.empty
+  var memoizedResolutionConfig: Config = ConfigFactory.load
 
   def kernelInfo(): KernelInfo =
     KernelInfo(
@@ -359,6 +360,7 @@ final class ArcInterpreter extends Interpreter {
           ipynb=true,
           inlineSchema=policyInlineSchema,
           inlineSQL=policyInlineSQL,
+          resolutionConfig=memoizedResolutionConfig,
         )
 
         // register udfs once
@@ -423,6 +425,7 @@ final class ArcInterpreter extends Interpreter {
                           case Some(df) => {
                             val result = Common.renderResult(spark, outputHandler, pipeline.stages.lastOption, df, numRows, truncate, monospace, leftAlign, datasetLabels, streamingDuration, confStreamingFrequency)
                             memoizedUserData = arcCtx.userData
+                            memoizedResolutionConfig = arcCtx.resolutionConfig
                             deregister.foreach { viewName => {
                               try {
                                 spark.catalog.dropTempView(viewName.toLowerCase())
