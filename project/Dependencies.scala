@@ -9,9 +9,9 @@ object Dependencies {
   val sparkHive = "org.apache.spark" %% "spark-hive" % sparkVersion % "provided"
   val sparkMl = "org.apache.spark" %% "spark-mllib" % sparkVersion % "provided"
 
-  val kernel = "sh.almond" %% "kernel" % "0.10.6"
+  val kernel = "sh.almond" %% "kernel" % "0.10.8"
 
-  val arc = "ai.tripl" %% "arc" % "3.4.0" % "provided"
+  val arc = "ai.tripl" %% "arc" % "3.4.1" % "provided"
 
   val etlDeps = Seq(
     sparkCore,

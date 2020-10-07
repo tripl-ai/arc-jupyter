@@ -58,10 +58,15 @@ case class FileDisplay(
   bytes: Long
 )
 
+object ArcInterpreter {
+  val CONF_PLACEHOLDER_VIEWNAME = "arcJupyterPlaceholderOutputView"
+}
+
 final class ArcInterpreter extends Interpreter {
 
   implicit var spark: SparkSession = _
   implicit var arcContext: ARCContext = _
+
 
   // the memory available to the container (i.e. the docker memory limit)
   val physicalMemory = ManagementFactory.getOperatingSystemMXBean.asInstanceOf[com.sun.management.OperatingSystemMXBean].getTotalPhysicalMemorySize
@@ -227,63 +232,62 @@ final class ArcInterpreter extends Interpreter {
 
         // parse input
         val lines = code.trim.split("\n")
-        val (interpreter, commandArgs, command, deregister) = lines(0) match {
-          case x if x.startsWith("%arc") => ("arc", parseArgs(lines(0)), lines.drop(1).mkString("\n"), None)
+        val (interpreter, commandArgs, command) = lines(0) match {
+          case x if x.startsWith("%arc") => ("arc", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           // outputs which may have outputView
-          case x if (x.startsWith("%sql") && !x.startsWith("%sqlvalidate")) || x.startsWith("%metadatafilter") => {
+          case x if (x.startsWith("%sql") && !x.startsWith("%sqlvalidate")) || x.startsWith("%metadatafilter")  || x.startsWith("%configexecute") => {
             val commandArgs = parseArgs(lines(0))
             commandArgs.get("outputView") match {
               case None => {
-                val rnd = Common.randStr(32)
-                ("arc", commandArgs, s"""${lines(0)} outputView=${rnd}\n${lines.drop(1).mkString("\n")}""", Option(rnd))
+                ("arc", commandArgs, s"""${lines(0)} outputView=${ArcInterpreter.CONF_PLACEHOLDER_VIEWNAME}\n${lines.drop(1).mkString("\n")}""")
               }
-              case Some(_) => ("arc", commandArgs, lines.mkString("\n"), None)
+              case Some(_) => ("arc", commandArgs, lines.mkString("\n"))
             }
           }
           case x if x.startsWith("%metadatavalidate") || x.startsWith("%sqlvalidate") => {
             val commandArgs = parseArgs(lines(0))
-            ("arc", commandArgs, lines.mkString("\n"), None)
+            ("arc", commandArgs, lines.mkString("\n"))
           }
           case x if (x.startsWith("%configplugin")) => {
-            ("configplugin", parseArgs(lines(0)), lines.drop(1).mkString("\n"), None)
+            ("configplugin", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
           case x if (x.startsWith("%lifecycleplugin")) => {
-            ("lifecycleplugin", parseArgs(lines(0)), lines.drop(1).mkString("\n"), None)
+            ("lifecycleplugin", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
           case x if (x.startsWith("%schema")) => {
-            ("schema", parseArgs(lines(0)), lines.drop(1).mkString("\n"), None)
+            ("schema", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
           case x if (x.startsWith("%printschema")) => {
-            ("printschema", parseArgs(lines(0)), lines.drop(1).mkString("\n"), None)
+            ("printschema", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
           case x if (x.startsWith("%metadata")) => {
-            ("metadata", parseArgs(lines(0)), lines.drop(1).mkString("\n"), None)
+            ("metadata", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
           case x if (x.startsWith("%printmetadata")) => {
-            ("printmetadata", parseArgs(lines(0)), lines.drop(1).mkString("\n"), None)
+            ("printmetadata", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
           case x if (x.startsWith("%summary")) => {
-            ("summary", parseArgs(lines(0)), lines.drop(1).mkString("\n"), None)
+            ("summary", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
           case x if (x.startsWith("%list")) => {
-            ("list", parseArgs(lines(0)), lines.drop(1).mkString("\n"), None)
+            ("list", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
           case x if (x.startsWith("%env")) => {
-            ("env", parseArgs(lines.mkString(" ")), "", None)
+            ("env", parseArgs(lines.mkString(" ")), "")
           }
           case x if (x.startsWith("%secret")) => {
-            ("secret", parseArgs(lines.mkString(" ")), lines.drop(1).mkString("\n"), None)
+            ("secret", parseArgs(lines.mkString(" ")), lines.drop(1).mkString("\n"))
           }
           case x if (x.startsWith("%conf")) => {
-            ("conf", parseArgs(lines.mkString(" ")), "", None)
+            ("conf", parseArgs(lines.mkString(" ")), "")
           }
           case x if (x.startsWith("%version")) => {
-            ("version", parseArgs(lines(0)), "", None)
+            ("version", parseArgs(lines(0)), "")
           }
           case x if (x.startsWith("%help")) => {
-            ("help", parseArgs(""), "", None)
+            ("help", parseArgs(""), "")
           }
-          case _ => ("arc", collection.mutable.Map[String, String](), code.trim, None)
+          case _ => ("arc", collection.mutable.Map[String, String](), code.trim)
         }
 
         val numRows = Try(commandArgs.get("numRows").get.toInt).getOrElse(confNumRows)
@@ -426,13 +430,6 @@ final class ArcInterpreter extends Interpreter {
                             val result = Common.renderResult(spark, outputHandler, pipeline.stages.lastOption, df, numRows, truncate, monospace, leftAlign, datasetLabels, streamingDuration, confStreamingFrequency)
                             memoizedUserData = arcCtx.userData
                             memoizedResolutionConfig = arcCtx.resolutionConfig
-                            deregister.foreach { viewName => {
-                              try {
-                                spark.catalog.dropTempView(viewName.toLowerCase())
-                              } catch {
-                                case e: Exception =>
-                              }
-                            }}
                             result
                           }
                           case None => {
@@ -595,6 +592,7 @@ final class ArcInterpreter extends Interpreter {
         case _ => false
       }
 
+      spark.catalog.dropTempView(ArcInterpreter.CONF_PLACEHOLDER_VIEWNAME.toLowerCase)
       removeListener(spark, executionListener, error)(outputHandler)
       executeResult
     } catch {

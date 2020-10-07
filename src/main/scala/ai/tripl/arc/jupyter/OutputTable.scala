@@ -89,7 +89,7 @@ case class OutputTablePlugin (
       }
 
       // dynamically create sql statements for all tables in the catalog
-      val tableCompletions = spark.catalog.listTables.map(_.name).collect.map { name =>
+      val tableCompletions = spark.catalog.listTables.map(_.name).collect.filter { _ != ArcInterpreter.CONF_PLACEHOLDER_VIEWNAME.toLowerCase }.map { name =>
         val df = spark.table(name)
         val fields = Common.flattenSchema(df.schema).map { _.mkString(".") }
         Common.Completer(
