@@ -1,5 +1,11 @@
 # Change Log
 
+## 3.6.1
+
+- add `%configexecute` support.
+- update `sh.almond:kernel` to 0.10.8.
+- **FIX** logic error relating to temporary placeholder views.
+
 ## 3.6.0
 
 - update to Arc 3.4.0.

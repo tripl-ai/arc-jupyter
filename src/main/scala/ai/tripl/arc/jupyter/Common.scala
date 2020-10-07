@@ -352,6 +352,19 @@ object Common {
       "https://arc.tripl.ai/execute/#logexecute"
     ),
     Completer(
+      "%configexecute",
+      "execute",
+      """%configexecute name="configexecute" environments=production,test
+      |SELECT
+      |  TO_JSON(
+      |    NAMED_STRUCT(
+      |      'key', 'value'
+      |    )
+      |  ) AS parameters""".stripMargin,
+      "sql",
+      "https://arc.tripl.ai/execute/#configexecute"
+    ),
+    Completer(
       "%metadatafilter",
       "transform",
       """%metadatafilter name="metadatafiltertransform" inputView=inputView outputView=outputView environments=production,test
