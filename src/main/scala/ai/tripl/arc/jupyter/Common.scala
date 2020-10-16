@@ -59,34 +59,23 @@ object Common {
   def getHelp(): String = {
     """
     |Commands:
-    |%arc
-    |Run the stage as an Arc stage. Useful if you want to override the config settings for an individual cell.
-    |Supported configuration parameters: numRows, truncate, monospace, streamingDuration
     |
-    |%sql
-    |Run an inline SQLTransform stage. e.g.:
-    |%sql name="calculate weather" outputView=weather environments=production,test persist=true
-    |
-    |%sqlvalidate
-    |Run an inline SQLValidate stage. e.g.:
-    |%sqlvalidate name="ensure no errors exist after data typing" environments=production,test sqlParams=input_table=${ETL_CONF_TABLE}
-    |
-    |%schema [view]
+    |%schema
+    |[view]
     |Display a JSON formatted schema for the input view
     |
-    |%printschema [view]
+    |%printschema
+    |[view]
     |Display a printable basic schema for the input view
     |
-    |%metadata [view]
+    |%metadata
+    |[view]
     |Create an Arc metadata dataset for the input view
     |Supported configuration parameters: numRows, truncate, outputView, persist, monospace
     |
-    |%printmetadata [view]
+    |%printmetadata
+    |[view]
     |Display a JSON formatted Arc metadata schema for the input view
-    |
-    |%summary [view]
-    |Create an Summary statistics dataset for the input view
-    |Supported configuration parameters: numRows, truncate, outputView, persist, monospace
     |
     |%env
     |Set variables for this session. E.g. ETL_CONF_BASE_DIR=/home/jovyan/tutorial
@@ -417,6 +406,30 @@ object Common {
       |  ) AS message""".stripMargin,
       "sql",
       "https://arc.tripl.ai/validate/#sqlvalidate"
+    ),
+    Completer(
+      "%metadata",
+      "execute",
+      """%metadata
+      |inputView""".stripMargin,
+      "shell",
+      ""
+    ),
+    Completer(
+      "%printmetadata",
+      "execute",
+      """%printmetadata
+      |inputView""".stripMargin,
+      "shell",
+      ""
+    ),
+    Completer(
+      "%printschema",
+      "execute",
+      """%printschema
+      |inputView""".stripMargin,
+      "shell",
+      ""
     )
   )
 
