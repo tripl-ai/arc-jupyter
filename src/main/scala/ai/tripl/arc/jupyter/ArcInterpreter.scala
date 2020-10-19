@@ -67,7 +67,6 @@ final class ArcInterpreter extends Interpreter {
   implicit var spark: SparkSession = _
   implicit var arcContext: ARCContext = _
 
-
   // the memory available to the container (i.e. the docker memory limit)
   val physicalMemory = ManagementFactory.getOperatingSystemMXBean.asInstanceOf[com.sun.management.OperatingSystemMXBean].getTotalPhysicalMemorySize
   // the JVM requested memory (-Xmx)
@@ -482,17 +481,6 @@ final class ArcInterpreter extends Interpreter {
           case "printmetadata" => {
             ExecuteResult.Success(
               DisplayData.text(MetadataUtils.makeMetadataFromDataframe(spark.table(command)))
-            )
-          }
-          case "summary" => {
-            val df = spark.table(command).summary()
-            commandArgs.get("outputView") match {
-              case Some(ov) => df.createOrReplaceTempView(ov)
-              case None =>
-            }
-            if (persist) df.persist(StorageLevel.MEMORY_AND_DISK_SER)
-            ExecuteResult.Success(
-              DisplayData.html(Common.renderHTML(df, None, numRows, truncate, monospace, leftAlign, datasetLabels))
             )
           }
           case "env" => {
