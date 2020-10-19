@@ -1,5 +1,10 @@
 # Change Log
 
+## 3.7.0
+
+- add `%metadata`, `%printmetadata` and `%printschema` to the completer options.
+- remove `%summary` executor in favour of `StatisticsExecute`
+
 ## 3.6.1
 
 - add `%configexecute` support.
