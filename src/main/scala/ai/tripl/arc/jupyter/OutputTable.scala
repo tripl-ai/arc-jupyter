@@ -67,7 +67,7 @@ case class OutputTablePlugin (
           val outputHandler = arcContext.userData.get("outputHandler") match {
             case Some(outputHandler: OutputHandler) => {
               outputHandler.asInstanceOf[OutputHandler].html(
-                Common.renderHTML(df, Some(stage), numRows, truncate, monospace, leftAlign, datasetLabels),
+                Common.renderHTML(df, None, Some(stage), numRows, truncate, monospace, leftAlign, datasetLabels, false),
                 Common.randStr(32)
               )
             }

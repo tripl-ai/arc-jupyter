@@ -40,7 +40,6 @@ import ai.tripl.arc.api.API.ARCContext
 import ai.tripl.arc.ARC
 import ai.tripl.arc.config.{ArcPipeline, ConfigUtils}
 import ai.tripl.arc.plugins._
-import ai.tripl.arc.util.log.LoggerFactory
 import ai.tripl.arc.util.MetadataUtils
 import ai.tripl.arc.util.SerializableConfiguration
 import ai.tripl.arc.util.SQLUtils
@@ -86,6 +85,7 @@ final class ArcInterpreter extends Interpreter {
   var confLeftAlign = Try(envOrNone("CONF_DISPLAY_LEFT_ALIGN").get.toBoolean).getOrElse(false)
   var confDatasetLabels = Try(envOrNone("CONF_DISPLAY_DATASET_LABELS").get.toBoolean).getOrElse(false)
   var confExtendedErrors = Try(envOrNone("CONF_DISPLAY_EXTENDED_ERRORS").get.toBoolean).getOrElse(true)
+  var confShowLog = Try(envOrNone("CONF_SHOW_LOG").get.toBoolean).getOrElse(false)
   var policyInlineSQL = Try(envOrNone("ETL_POLICY_INLINE_SQL").get.toBoolean).getOrElse(true)
   var policyInlineSchema = Try(envOrNone("ETL_POLICY_INLINE_SCHEMA").get.toBoolean).getOrElse(true)
   var confStreaming = false
@@ -175,7 +175,7 @@ final class ArcInterpreter extends Interpreter {
         }}
 
       val loader = ai.tripl.arc.util.Utils.getContextOrSparkClassLoader
-      implicit val logger = LoggerFactory.getLogger("arc-jupyter")
+      implicit val logger = Common.getLogger()
 
       val sparkConf = new java.util.HashMap[String, String]()
       spark.sparkContext.getConf.getAll.filter{ case (k, _) => !Seq("spark.authenticate.secret").contains(k) }.foreach{ case (k, v) => sparkConf.put(k, v) }
@@ -221,7 +221,8 @@ final class ArcInterpreter extends Interpreter {
       } else if (spark == null) {
         return ExecuteResult.Error(s"SparkSession has not been initialised. Please restart Kernel or wait for startup completion.")
       } else {
-        implicit val logger = LoggerFactory.getLogger("arc-jupyter")
+        val inMemoryLoggerAppender = new InMemoryLoggerAppender()
+        implicit val logger = Common.getLogger(Some(inMemoryLoggerAppender))
 
         // if session config changed and session stopped
         val session = startSession()
@@ -272,7 +273,7 @@ final class ArcInterpreter extends Interpreter {
             ("list", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
           case x if (x.startsWith("%env")) => {
-            ("env", parseArgs(lines.mkString(" ")), "")
+            ("env", parseEnv(lines.mkString("\n")), "")
           }
           case x if (x.startsWith("%secret")) => {
             ("secret", parseArgs(lines.mkString(" ")), lines.drop(1).mkString("\n"))
@@ -426,7 +427,7 @@ final class ArcInterpreter extends Interpreter {
                         }
                         ARC.run(pipeline)(spark, logger, arcCtx) match {
                           case Some(df) => {
-                            val result = Common.renderResult(spark, outputHandler, pipeline.stages.lastOption, df, numRows, truncate, monospace, leftAlign, datasetLabels, streamingDuration, confStreamingFrequency)
+                            val result = Common.renderResult(spark, outputHandler, pipeline.stages.lastOption, df, inMemoryLoggerAppender, numRows, truncate, monospace, leftAlign, datasetLabels, streamingDuration, confStreamingFrequency, confShowLog)
                             memoizedUserData = arcCtx.userData
                             memoizedResolutionConfig = arcCtx.resolutionConfig
                             result
@@ -475,7 +476,7 @@ final class ArcInterpreter extends Interpreter {
             }
             if (persist) df.persist(StorageLevel.MEMORY_AND_DISK_SER)
             ExecuteResult.Success(
-              DisplayData.html(Common.renderHTML(df, None, Int.MaxValue, truncate, monospace, leftAlign, datasetLabels))
+              DisplayData.html(Common.renderHTML(df, Option(inMemoryLoggerAppender), None, Int.MaxValue, truncate, monospace, leftAlign, datasetLabels, confShowLog))
             )
           }
           case "printmetadata" => {
@@ -516,6 +517,7 @@ final class ArcInterpreter extends Interpreter {
             confStreamingDuration = Try(commandArgs.get("streamingDuration").get.toInt).getOrElse(confStreamingDuration)
             confMonospace = Try(commandArgs.get("monospace").get.toBoolean).getOrElse(confMonospace)
             confLeftAlign = Try(commandArgs.get("leftAlign").get.toBoolean).getOrElse(confLeftAlign)
+            confShowLog = Try(commandArgs.get("logger").get.toBoolean).getOrElse(confShowLog)
             confDatasetLabels = Try(commandArgs.get("datasetLabels").get.toBoolean).getOrElse(confDatasetLabels)
             confExtendedErrors = Try(commandArgs.get("extendedErrors").get.toBoolean).getOrElse(confExtendedErrors)
 
@@ -532,6 +534,7 @@ final class ArcInterpreter extends Interpreter {
             |extendedErrors: ${confExtendedErrors}
             |datasetLabels: ${confDatasetLabels}
             |leftAlign: ${leftAlign}
+            |logger: ${confShowLog}
             |monospace: ${confMonospace}
             |numRows: ${confNumRows}
             |truncate: ${confTruncate}
@@ -569,7 +572,7 @@ final class ArcInterpreter extends Interpreter {
             }
             if (persist) df.persist(StorageLevel.MEMORY_AND_DISK_SER)
             ExecuteResult.Success(
-              DisplayData.html(Common.renderHTML(df, None, numRows, truncate, monospace, leftAlign, datasetLabels))
+              DisplayData.html(Common.renderHTML(df, None, None, numRows, truncate, monospace, leftAlign, datasetLabels, false))
             )
           }
         }
@@ -606,6 +609,19 @@ final class ArcInterpreter extends Interpreter {
       case _ =>
     }
   }
+
+  def parseEnv(envs: String): Map[String, String] = {
+    envs
+      .split("\n")
+      .filter { !_.startsWith("%") }
+      .flatMap { env =>
+        // regex split on only single = signs not at start or end of line
+        val pair = env.split("=(?!=)(?!$)", 2)
+        if (pair.length == 2)  Some(pair(0) -> pair(1)) else None
+      }
+      .toMap
+  }
+
 
   def parseArgs(input: String): collection.mutable.Map[String, String] = {
     val args = collection.mutable.Map[String, String]()
