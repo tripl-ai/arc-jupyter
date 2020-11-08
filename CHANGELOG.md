@@ -1,5 +1,9 @@
 # Change Log
 
+## 3.8.0
+
+- add `logger` configuration (`CONF_SHOW_LOG`) option.
+
 ## 3.7.0
 
 - add `%metadata`, `%printmetadata` and `%printschema` to the completer options.
