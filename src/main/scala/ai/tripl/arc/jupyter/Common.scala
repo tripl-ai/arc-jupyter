@@ -9,6 +9,8 @@ import java.nio.charset.StandardCharsets
 import util.control.Breaks._
 import scala.collection.JavaConverters._
 
+import com.fasterxml.jackson.databind.ObjectMapper
+
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql._
 import org.apache.spark.sql.expressions.Window
@@ -23,11 +25,15 @@ import almond.protocol.RawJson
 
 import ai.tripl.arc.api.API
 import ai.tripl.arc.api.API._
+import ai.tripl.arc.util.log.LoggerFactory
 
 import com.fasterxml.jackson.databind._
 import com.fasterxml.jackson.databind.node._
 
+import org.apache.log4j.{Level, Logger}
+
 object Common {
+  val objectMapper = new ObjectMapper()
 
   // converts the schema of an input dataframe into a dataframe [name, nullable, type, metadata.*]
   def createPrettyMetadataDataframe(input: DataFrame)(implicit spark: SparkSession, logger: ai.tripl.arc.util.log.logger.Logger): DataFrame = {
@@ -140,10 +146,10 @@ object Common {
     stmt
   }
 
-  def renderResult(spark: SparkSession, outputHandler: Option[OutputHandler], stage: Option[PipelineStage], df: DataFrame, numRows: Int, truncate: Int, monospace: Boolean, leftAlign: Boolean, datasetLabels: Boolean, streamingDuration: Int, confStreamingFrequency: Int) = {
+  def renderResult(spark: SparkSession, outputHandler: Option[OutputHandler], stage: Option[PipelineStage], df: DataFrame, inMemoryLoggerAppender: InMemoryLoggerAppender, numRows: Int, truncate: Int, monospace: Boolean, leftAlign: Boolean, datasetLabels: Boolean, streamingDuration: Int, confStreamingFrequency: Int, confShowLog: Boolean) = {
     if (!df.isStreaming) {
       ExecuteResult.Success(
-        DisplayData.html(renderHTML(df, stage, numRows, truncate, monospace, leftAlign, datasetLabels))
+        DisplayData.html(renderHTML(df, Option(inMemoryLoggerAppender), stage, numRows, truncate, monospace, leftAlign, datasetLabels, confShowLog))
       )
     } else {
       outputHandler match {
@@ -175,13 +181,13 @@ object Common {
               // create the html handle on the first run
               if (initial) {
                 outputHandler.html(
-                  renderHTML(df, None, numRows, truncate, monospace, leftAlign, datasetLabels),
+                  renderHTML(df, None, None, numRows, truncate, monospace, leftAlign, datasetLabels, confShowLog),
                   outputElementHandle
                 )
                 initial = false
               } else {
                 outputHandler.updateHtml(
-                  renderHTML(df, None, numRows, truncate, monospace, leftAlign, datasetLabels),
+                  renderHTML(df, None, None, numRows, truncate, monospace, leftAlign, datasetLabels, confShowLog),
                   outputElementHandle
                 )
               }
@@ -199,7 +205,7 @@ object Common {
           writeStream.stop
           outputHandler.html("", outputElementHandle)
           ExecuteResult.Success(
-            DisplayData.html(renderHTML(spark.table(queryName), None, numRows, truncate, monospace, leftAlign, datasetLabels))
+            DisplayData.html(renderHTML(spark.table(queryName), Option(inMemoryLoggerAppender), None, numRows, truncate, monospace, leftAlign, datasetLabels, confShowLog))
           )
         }
         case None => ExecuteResult.Error("No result.")
@@ -207,7 +213,7 @@ object Common {
     }
   }
 
-  def renderHTML(df: DataFrame, stage: Option[PipelineStage], numRows: Int, truncate: Int, monospace: Boolean, leftAlign: Boolean, datasetLabels: Boolean): String = {
+  def renderHTML(df: DataFrame, inMemoryLoggerAppender: Option[InMemoryLoggerAppender], stage: Option[PipelineStage], numRows: Int, truncate: Int, monospace: Boolean, leftAlign: Boolean, datasetLabels: Boolean, confShowLog: Boolean): String = {
     import xml.Utility.escape
 
     val header = df.columns
@@ -292,7 +298,15 @@ object Common {
       ""
     }
 
-    s"""${label}<table class="tex2jax_ignore ${monospaceClass} ${leftAlignClass}"><thead><tr>${header.map(h => s"<th>${escape(h)}</th>").mkString}</tr></thead><tbody>${rows.map { row => s"<tr>${row.map { cell => s"<td>${escape(cell)}</td>" }.mkString}</tr>"}.mkString}</tbody></table>"""
+
+    val table = s"""${label}<table class="tex2jax_ignore ${monospaceClass} ${leftAlignClass}"><thead><tr>${header.map(h => s"<th>${escape(h)}</th>").mkString}</tr></thead><tbody>${rows.map { row => s"<tr>${row.map { cell => s"<td>${escape(cell)}</td>" }.mkString}</tr>"}.mkString}</tbody></table>"""
+    if (confShowLog) {
+      val message = objectMapper.readValue(inMemoryLoggerAppender.get.getResult.last, classOf[java.util.HashMap[String, Object]])
+      val reformatted = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(message).replaceAll("\n"," ").replaceAll("\\s\\s+", " ").replaceAll("\" :", "\":").replaceAll("\\{ ", "{").replaceAll(" \\}", "}").replaceAll("\\[ ", "[").replaceAll(" \\]", "]")
+      s"""${table}<div class="log tex2jax_ignore"><div>${reformatted}</div></div>"""
+    } else {
+      table
+    }
   }
 
   val alpha = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -312,8 +326,6 @@ object Common {
       case StructField(name, _, _, _) => Seq(parents ++ Seq(escape(name)))
     }
   }
-
-
 
   case class Completer (
     text: String,
@@ -534,4 +546,12 @@ object Common {
     }
   }
 
+  def getLogger(appender: Option[InMemoryLoggerAppender] = None)(implicit spark: SparkSession): ai.tripl.arc.util.log.logger.Logger = {
+    val loader = ai.tripl.arc.util.Utils.getContextOrSparkClassLoader
+    val logger = LoggerFactory.getLogger(spark.sparkContext.applicationId)
+    Logger.getLogger("org").setLevel(Level.ERROR)
+    Logger.getLogger("breeze").setLevel(Level.ERROR)
+    appender.foreach { Logger.getLogger(spark.sparkContext.applicationId).addAppender(_) }
+    logger
+  }
 }
