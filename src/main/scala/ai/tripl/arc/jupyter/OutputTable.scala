@@ -21,26 +21,28 @@ class OutputTable extends LifecyclePlugin {
     import ai.tripl.arc.config.ConfigUtils._
     implicit val c = config
 
-    val expectedKeys = "type" :: "numRows" :: "truncate" :: "monospace" :: "leftAlign" :: "datasetLabels" :: Nil
+    val expectedKeys = "type" :: "numRows" :: "maxNumRows" :: "truncate" :: "monospace" :: "leftAlign" :: "datasetLabels" :: Nil
     val numRows = getValue[Int]("numRows")
+    val maxNumRows = getValue[Int]("maxNumRows")
     val truncate = getValue[Int]("truncate")
     val monospace = getValue[java.lang.Boolean]("monospace")
     val leftAlign = getValue[java.lang.Boolean]("leftAlign")
     val datasetLabels = getValue[java.lang.Boolean]("datasetLabels")
     val invalidKeys = checkValidKeys(c)(expectedKeys)
 
-    (numRows, truncate, monospace, leftAlign, datasetLabels, invalidKeys) match {
-      case (Right(numRows), Right(truncate), Right(monospace), Right(leftAlign), Right(datasetLabels), Right(invalidKeys)) =>
+    (numRows, maxNumRows, truncate, monospace, leftAlign, datasetLabels, invalidKeys) match {
+      case (Right(numRows), Right(maxNumRows), Right(truncate), Right(monospace), Right(leftAlign), Right(datasetLabels), Right(invalidKeys)) =>
         Right(OutputTablePlugin(
           plugin=this,
           numRows=numRows,
+          maxNumRows=maxNumRows,
           truncate=truncate,
           monospace=monospace,
           leftAlign=leftAlign,
           datasetLabels=datasetLabels
         ))
       case _ =>
-        val allErrors: Errors = List(numRows, truncate, monospace, leftAlign, datasetLabels, invalidKeys).collect{ case Left(errs) => errs }.flatten
+        val allErrors: Errors = List(numRows, maxNumRows, truncate, monospace, leftAlign, datasetLabels, invalidKeys).collect{ case Left(errs) => errs }.flatten
         val err = StageError(index, this.getClass.getName, c.origin.lineNumber, allErrors)
         Left(err :: Nil)
     }
@@ -50,6 +52,7 @@ class OutputTable extends LifecyclePlugin {
 case class OutputTablePlugin (
     plugin: OutputTable,
     numRows: Int,
+    maxNumRows: Int,
     truncate: Int,
     monospace: Boolean,
     leftAlign: Boolean,
@@ -67,7 +70,7 @@ case class OutputTablePlugin (
           val outputHandler = arcContext.userData.get("outputHandler") match {
             case Some(outputHandler: OutputHandler) => {
               outputHandler.asInstanceOf[OutputHandler].html(
-                Common.renderHTML(df, None, Some(stage), numRows, truncate, monospace, leftAlign, datasetLabels, false),
+                Common.renderHTML(df, None, Some(stage), numRows, maxNumRows, truncate, monospace, leftAlign, datasetLabels, false),
                 Common.randStr(32)
               )
             }
@@ -89,21 +92,55 @@ case class OutputTablePlugin (
       }
 
       // dynamically create sql statements for all tables in the catalog
-      val tableCompletions = spark.catalog.listTables.map(_.name).collect.filter { _ != ArcInterpreter.CONF_PLACEHOLDER_VIEWNAME.toLowerCase }.map { name =>
+      val tableCompletions = spark.catalog.listTables.map(_.name).collect.filter { _ != ArcInterpreter.CONF_PLACEHOLDER_VIEWNAME.toLowerCase }.flatMap { name =>
         val df = spark.table(name)
         val fields = Common.flattenSchema(df.schema).map { _.mkString(".") }
-        Common.Completer(
-          s"%sql ${name}",
-          "transform",
-          s"""%sql name="${name}" outputView=outputView environments=production,test
-          |SELECT
-          |${fields.mkString("  ", "\n  ,", "")}
-          |FROM ${name}""".stripMargin,
-          "sql",
-          "https://arc.tripl.ai/transform/#sqltransform"
+        List(
+          Common.Completer(
+            s"%sql ${name}",
+            "transform",
+            s"""%sql name="${name}" outputView=outputView environments=production,test
+            |SELECT
+            |${fields.mkString("  ", "\n  ,", "")}
+            |FROM ${name}""".stripMargin,
+            "sql",
+            "https://arc.tripl.ai/transform/#sqltransform"
+          ),
+          Common.Completer(
+            s"%metadata ${name}",
+            "execute",
+            s"""%metadata
+            |${name}""".stripMargin,
+            "shell",
+            ""
+          ),
+          Common.Completer(
+            s"%printmetadata ${name}",
+            "execute",
+            s"""%printmetadata
+            |${name}""".stripMargin,
+            "shell",
+            ""
+          ),
+          Common.Completer(
+            s"%schema ${name}",
+            "execute",
+            s"""%schema
+            |${name}""".stripMargin,
+            "shell",
+            ""
+          ),
+          Common.Completer(
+            s"%printschema ${name}",
+            "execute",
+            s"""%printschema
+            |${name}""".stripMargin,
+            "shell",
+            ""
+          ),
         )
       }.toList
-      arcContext.userData.put("tableCompletions", tableCompletions)
+      arcContext.userData.put(Common.TABLE_COMPLETIONS_KEY, tableCompletions)
     }
 
     result

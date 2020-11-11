@@ -1,5 +1,12 @@
 # Change Log
 
+## 3.9.0
+
+- add `CONF_MAX_NUM_ROWS` environment variable to set maximum number of rows returned to reduce data exfiltration risk.
+- add `%conf`, `%env` and `%schema` to the completer options.
+- change completers for `%metadata`, `%printmetadata` and `%printschema` to populate available table names.
+- **FIX** logic error with optional `logger`.
+
 ## 3.8.0
 
 - add `logger` configuration (`CONF_SHOW_LOG`) option.
