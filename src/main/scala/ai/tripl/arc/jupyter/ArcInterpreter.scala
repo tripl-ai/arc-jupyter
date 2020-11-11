@@ -44,10 +44,7 @@ import ai.tripl.arc.util.MetadataUtils
 import ai.tripl.arc.util.SerializableConfiguration
 import ai.tripl.arc.util.SQLUtils
 
-case class ConfigValue (
-  secret: Boolean,
-  value: String
-)
+
 
 case class FileDisplay(
   path: String,
@@ -75,9 +72,10 @@ final class ArcInterpreter extends Interpreter {
 
   val secretPattern = """"(token|signature|accessKey|secret|secretAccessKey)":[\s]*".*"""".r
 
-  var confCommandLineArgs: Map[String, ConfigValue] = Map.empty
+  var confCommandLineArgs: Map[String, Common.ConfigValue] = Map.empty
   var confMaster = envOrNone("CONF_MASTER").getOrElse("local[*]")
   var confNumRows = Try(envOrNone("CONF_NUM_ROWS").get.toInt).getOrElse(20)
+  var confMaxNumRows = Try(envOrNone("CONF_MAX_NUM_ROWS").get.toInt).getOrElse(Int.MaxValue)
   var confTruncate = Try(envOrNone("CONF_TRUNCATE").get.toInt).getOrElse(50)
   var confStreamingDuration = Try(envOrNone("CONF_STREAMING_DURATION").get.toInt).getOrElse(10)
   var confStreamingFrequency = Try(envOrNone("CONF_STREAMING_FREQUENCY").get.toInt).getOrElse(1000)
@@ -126,7 +124,7 @@ final class ArcInterpreter extends Interpreter {
   override def asyncComplete(code: String, pos: Int): Option[CancellableFuture[Completion]] = {
     val spaceIndex = code.indexOf(" ")
     if (spaceIndex == -1 || (pos < spaceIndex)){
-      val c = Common.getCompletions(pos, code.length)
+      val c = Common.getCompletions(pos, code.length, confCommandLineArgs, confDatasetLabels, confExtendedErrors, confLeftAlign, confShowLog, confMonospace, confNumRows, confTruncate, confStreaming, confStreamingDuration)
       Some(CancellableFuture(Future.successful(c), () => sys.error("should not happen")))
     } else {
       None
@@ -266,9 +264,6 @@ final class ArcInterpreter extends Interpreter {
           case x if (x.startsWith("%printmetadata")) => {
             ("printmetadata", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
-          case x if (x.startsWith("%summary")) => {
-            ("summary", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
-          }
           case x if (x.startsWith("%list")) => {
             ("list", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           }
@@ -376,7 +371,7 @@ final class ArcInterpreter extends Interpreter {
         outputHandler match {
           case Some(outputHandler) => {
             interpreter match {
-              case "arc" | "summary" => {
+              case "arc" => {
                 val listener = new ProgressSparkListener(listenerElementHandle)(outputHandler, logger)
                 listener.init()(outputHandler)
                 spark.sparkContext.addSparkListener(listener)
@@ -402,6 +397,7 @@ final class ArcInterpreter extends Interpreter {
                         {
                           "type": "OutputTable",
                           "numRows": ${numRows},
+                          "maxNumRows": ${confMaxNumRows},
                           "truncate": ${truncate},
                           "monospace": ${monospace},
                           "leftAlign": ${leftAlign},
@@ -427,7 +423,7 @@ final class ArcInterpreter extends Interpreter {
                         }
                         ARC.run(pipeline)(spark, logger, arcCtx) match {
                           case Some(df) => {
-                            val result = Common.renderResult(spark, outputHandler, pipeline.stages.lastOption, df, inMemoryLoggerAppender, numRows, truncate, monospace, leftAlign, datasetLabels, streamingDuration, confStreamingFrequency, confShowLog)
+                            val result = Common.renderResult(spark, outputHandler, pipeline.stages.lastOption, df, inMemoryLoggerAppender, numRows, confMaxNumRows, truncate, monospace, leftAlign, datasetLabels, streamingDuration, confStreamingFrequency, confShowLog)
                             memoizedUserData = arcCtx.userData
                             memoizedResolutionConfig = arcCtx.resolutionConfig
                             result
@@ -451,7 +447,7 @@ final class ArcInterpreter extends Interpreter {
               case Right(dynamicConfigs) => {
                 val dynamicConfigsConf = dynamicConfigs.reduceRight[Config]{ case (c1, c2) => c1.withFallback(c2) }
                 val entryMap = dynamicConfigsConf.entrySet.asScala.map { entry =>
-                  entry.getKey -> ConfigValue(false, entry.getValue.unwrapped.toString)
+                  entry.getKey -> Common.ConfigValue(false, entry.getValue.unwrapped.toString)
                 }.toMap
                 confCommandLineArgs = confCommandLineArgs ++ entryMap
               }
@@ -476,7 +472,7 @@ final class ArcInterpreter extends Interpreter {
             }
             if (persist) df.persist(StorageLevel.MEMORY_AND_DISK_SER)
             ExecuteResult.Success(
-              DisplayData.html(Common.renderHTML(df, Option(inMemoryLoggerAppender), None, Int.MaxValue, truncate, monospace, leftAlign, datasetLabels, confShowLog))
+              DisplayData.html(Common.renderHTML(df, None, None, Int.MaxValue, Int.MaxValue, truncate, monospace, leftAlign, datasetLabels, confShowLog))
             )
           }
           case "printmetadata" => {
@@ -486,18 +482,18 @@ final class ArcInterpreter extends Interpreter {
           }
           case "env" => {
             if (!commandArgs.isEmpty) {
-              confCommandLineArgs = commandArgs.map { case (key, value) => key -> ConfigValue(false, value) }.toMap
+              confCommandLineArgs = commandArgs.map { case (key, value) => key -> Common.ConfigValue(false, value) }.toMap
             }
             ExecuteResult.Success(DisplayData.text(confCommandLineArgs.map { case (key, configValue) => s"${key}: ${if (configValue.secret) "*" * configValue.value.length else configValue.value }" }.toList.sorted.mkString("\n")))
           }
           case "secret" => {
-            val secrets = collection.mutable.Map[String, ConfigValue]()
+            val secrets = collection.mutable.Map[String, Common.ConfigValue]()
             command.split("\n").map(_.trim).foreach { key =>
               val value = inputManager match {
                 case Some(im) => Await.result(im.password(key), Duration.Inf)
                 case None => ""
               }
-              secrets += (key -> ConfigValue(true, value))
+              secrets += (key -> Common.ConfigValue(true, value))
             }
 
             confCommandLineArgs = confCommandLineArgs ++ secrets
@@ -531,10 +527,11 @@ final class ArcInterpreter extends Interpreter {
             |streamingDuration: ${confStreamingDuration}
             |
             |Display Options:
-            |extendedErrors: ${confExtendedErrors}
             |datasetLabels: ${confDatasetLabels}
+            |extendedErrors: ${confExtendedErrors}
             |leftAlign: ${leftAlign}
             |logger: ${confShowLog}
+            |maxNumRows: ${confMaxNumRows}
             |monospace: ${confMonospace}
             |numRows: ${confNumRows}
             |truncate: ${confTruncate}
@@ -572,7 +569,7 @@ final class ArcInterpreter extends Interpreter {
             }
             if (persist) df.persist(StorageLevel.MEMORY_AND_DISK_SER)
             ExecuteResult.Success(
-              DisplayData.html(Common.renderHTML(df, None, None, numRows, truncate, monospace, leftAlign, datasetLabels, false))
+              DisplayData.html(Common.renderHTML(df, None, None, numRows, Int.MaxValue, truncate, monospace, leftAlign, datasetLabels, false))
             )
           }
         }

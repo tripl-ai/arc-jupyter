@@ -33,6 +33,13 @@ import com.fasterxml.jackson.databind.node._
 import org.apache.log4j.{Level, Logger}
 
 object Common {
+  val TABLE_COMPLETIONS_KEY = "ai.tripl.arc.jupyter.tableCompletions"
+
+  case class ConfigValue (
+    secret: Boolean,
+    value: String
+  )
+
   val objectMapper = new ObjectMapper()
 
   // converts the schema of an input dataframe into a dataframe [name, nullable, type, metadata.*]
@@ -66,38 +73,40 @@ object Common {
     """
     |Commands:
     |
-    |%schema
-    |[view]
-    |Display a JSON formatted schema for the input view
+    |%conf
+    |Set global Configuration Parameters which will apply to all cells.
     |
-    |%printschema
-    |[view]
-    |Display a printable basic schema for the input view
+    |%env
+    |Set variables for this session. E.g. ETL_CONF_BASE_DIR=/home/jovyan/tutorial
+    |
+    |%help
+    |Display this help text.
+    |
+    |%list
+    |Show a list of files in a target directory
     |
     |%metadata
     |[view]
     |Create an Arc metadata dataset for the input view
-    |Supported configuration parameters: numRows, truncate, outputView, persist, monospace
     |
     |%printmetadata
     |[view]
     |Display a JSON formatted Arc metadata schema for the input view
     |
-    |%env
-    |Set variables for this session. E.g. ETL_CONF_BASE_DIR=/home/jovyan/tutorial
-    |Supported configuration parameters: numRows, truncate, outputView, persist, monospace, streamingDuration
+    |%printschema
+    |[view]
+    |Display a printable basic schema for the input view
+    |
+    |%schema
+    |[view]
+    |Display a JSON formatted schema for the input view
     |
     |%secret
     |Set secrets for this session. E.g. ETL_CONF_SECRET
     |
-    |%conf
-    |Set global Configuration Parameters which will apply to all cells.
+    |%version
+    |Display Arc and Arc-Jupyter version information.
     |
-    |%list
-    |Show a list of files in a target directory
-    |
-    |%help
-    |Display this help text.
     |
     |Configuration Parameters:
     |master:            The address of the Spark master (if connecting to a remote cluster)
@@ -106,7 +115,9 @@ object Common {
     |
     |Display Parameters:
     |datasetLabels:     Display labels with the name of the registered table name
+    |extendedErrors:    Show more verbose errors.
     |leftAlign:         Left-align output datasets
+    |logger:            Show Arc logs as part of the result set.
     |monospace:         Use a fixed-width font
     |numRows:           The maximum number of rows to return in a dataset (integer)
     |truncate:          The maximum number of characters displayed in a string result (integer)
@@ -146,10 +157,10 @@ object Common {
     stmt
   }
 
-  def renderResult(spark: SparkSession, outputHandler: Option[OutputHandler], stage: Option[PipelineStage], df: DataFrame, inMemoryLoggerAppender: InMemoryLoggerAppender, numRows: Int, truncate: Int, monospace: Boolean, leftAlign: Boolean, datasetLabels: Boolean, streamingDuration: Int, confStreamingFrequency: Int, confShowLog: Boolean) = {
+  def renderResult(spark: SparkSession, outputHandler: Option[OutputHandler], stage: Option[PipelineStage], df: DataFrame, inMemoryLoggerAppender: InMemoryLoggerAppender, numRows: Int, maxNumRows: Int, truncate: Int, monospace: Boolean, leftAlign: Boolean, datasetLabels: Boolean, streamingDuration: Int, confStreamingFrequency: Int, confShowLog: Boolean) = {
     if (!df.isStreaming) {
       ExecuteResult.Success(
-        DisplayData.html(renderHTML(df, Option(inMemoryLoggerAppender), stage, numRows, truncate, monospace, leftAlign, datasetLabels, confShowLog))
+        DisplayData.html(renderHTML(df, Option(inMemoryLoggerAppender), stage, numRows, maxNumRows, truncate, monospace, leftAlign, datasetLabels, confShowLog))
       )
     } else {
       outputHandler match {
@@ -181,13 +192,13 @@ object Common {
               // create the html handle on the first run
               if (initial) {
                 outputHandler.html(
-                  renderHTML(df, None, None, numRows, truncate, monospace, leftAlign, datasetLabels, confShowLog),
+                  renderHTML(df, None, None, numRows, maxNumRows, truncate, monospace, leftAlign, datasetLabels, confShowLog),
                   outputElementHandle
                 )
                 initial = false
               } else {
                 outputHandler.updateHtml(
-                  renderHTML(df, None, None, numRows, truncate, monospace, leftAlign, datasetLabels, confShowLog),
+                  renderHTML(df, None, None, numRows, maxNumRows, truncate, monospace, leftAlign, datasetLabels, confShowLog),
                   outputElementHandle
                 )
               }
@@ -205,7 +216,7 @@ object Common {
           writeStream.stop
           outputHandler.html("", outputElementHandle)
           ExecuteResult.Success(
-            DisplayData.html(renderHTML(spark.table(queryName), Option(inMemoryLoggerAppender), None, numRows, truncate, monospace, leftAlign, datasetLabels, confShowLog))
+            DisplayData.html(renderHTML(spark.table(queryName), Option(inMemoryLoggerAppender), None, numRows, maxNumRows, truncate, monospace, leftAlign, datasetLabels, confShowLog))
           )
         }
         case None => ExecuteResult.Error("No result.")
@@ -213,7 +224,7 @@ object Common {
     }
   }
 
-  def renderHTML(df: DataFrame, inMemoryLoggerAppender: Option[InMemoryLoggerAppender], stage: Option[PipelineStage], numRows: Int, truncate: Int, monospace: Boolean, leftAlign: Boolean, datasetLabels: Boolean, confShowLog: Boolean): String = {
+  def renderHTML(df: DataFrame, inMemoryLoggerAppender: Option[InMemoryLoggerAppender], stage: Option[PipelineStage], numRows: Int, maxNumRows: Int, truncate: Int, monospace: Boolean, leftAlign: Boolean, datasetLabels: Boolean, confShowLog: Boolean): String = {
     import xml.Utility.escape
 
     val header = df.columns
@@ -239,7 +250,7 @@ object Common {
         case _ => col(fieldName).cast(StringType)
       }
     }
-    val data = renamedDF.select(castCols: _*).take(numRows)
+    val data = renamedDF.select(castCols: _*).take(Math.min(numRows, maxNumRows))
 
     // For array values, replace Seq and Array with square brackets
     // For cells that are beyond `truncate` characters, replace it with the
@@ -300,7 +311,7 @@ object Common {
 
 
     val table = s"""${label}<table class="tex2jax_ignore ${monospaceClass} ${leftAlignClass}"><thead><tr>${header.map(h => s"<th>${escape(h)}</th>").mkString}</tr></thead><tbody>${rows.map { row => s"<tr>${row.map { cell => s"<td>${escape(cell)}</td>" }.mkString}</tr>"}.mkString}</tbody></table>"""
-    if (confShowLog) {
+    if (confShowLog && inMemoryLoggerAppender.isDefined) {
       val message = objectMapper.readValue(inMemoryLoggerAppender.get.getResult.last, classOf[java.util.HashMap[String, Object]])
       val reformatted = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(message).replaceAll("\n"," ").replaceAll("\\s\\s+", " ").replaceAll("\" :", "\":").replaceAll("\\{ ", "{").replaceAll(" \\}", "}").replaceAll("\\[ ", "[").replaceAll(" \\]", "]")
       s"""${table}<div class="log tex2jax_ignore"><div>${reformatted}</div></div>"""
@@ -419,34 +430,23 @@ object Common {
       "sql",
       "https://arc.tripl.ai/validate/#sqlvalidate"
     ),
-    Completer(
-      "%metadata",
-      "execute",
-      """%metadata
-      |inputView""".stripMargin,
-      "shell",
-      ""
-    ),
-    Completer(
-      "%printmetadata",
-      "execute",
-      """%printmetadata
-      |inputView""".stripMargin,
-      "shell",
-      ""
-    ),
-    Completer(
-      "%printschema",
-      "execute",
-      """%printschema
-      |inputView""".stripMargin,
-      "shell",
-      ""
-    )
   )
 
   // todo: these should come from traits in arc
-  def getCompletions(pos: Int, length: Int)(implicit spark: SparkSession, arcContext: ARCContext): Completion = {
+  def getCompletions(
+    pos: Int,
+    length: Int,
+    commandLineArgs: Map[String, Common.ConfigValue],
+    confDatasetLabels: Boolean,
+    confExtendedErrors: Boolean,
+    confLeftAlign: Boolean,
+    confShowLog: Boolean,
+    confMonospace: Boolean,
+    confNumRows: Int,
+    confTruncate: Int,
+    confStreaming: Boolean,
+    confStreamingDuration: Int,
+  )(implicit spark: SparkSession, arcContext: ARCContext): Completion = {
     import spark.implicits._
 
     // progressively enable additional completions as the arcContext becomes available
@@ -471,12 +471,39 @@ object Common {
         }
       }
 
+      val dynamicCompletions = List(
+        Completer(
+          "%conf",
+          "execute",
+          s"""%conf
+          |datasetLabels=${confDatasetLabels}
+          |extendedErrors=${confExtendedErrors}
+          |leftAlign=${confLeftAlign}
+          |logger=${confShowLog}
+          |monospace=${confMonospace}
+          |numRows=${confNumRows}
+          |streaming=${confStreaming}
+          |streamingDuration=${confStreamingDuration}
+          |truncate=${confTruncate}""".stripMargin,
+          "shell",
+          ""
+        ),
+        Completer(
+          "%env",
+          "execute",
+          s"""%env
+          |${commandLineArgs.map { case (key, configValue) => s"${key}=${if (configValue.secret) "*" * configValue.value.length else configValue.value }" }.toList.sorted.mkString("\n")}""".stripMargin,
+          "shell",
+          ""
+        ),
+      )
+
       // add any registered tables (see OutputTable for registration)
-      if (arcContext.userData.contains("tableCompletions")) {
-        val tableCompletions = arcContext.userData.get("tableCompletions").get.asInstanceOf[List[Completer]]
-        (pluginCompletions ++ jupyterCompletions ++ tableCompletions)
+      if (arcContext.userData.contains(Common.TABLE_COMPLETIONS_KEY)) {
+        val tableCompletions = arcContext.userData.get(Common.TABLE_COMPLETIONS_KEY).get.asInstanceOf[List[Completer]]
+        (pluginCompletions ++ jupyterCompletions ++ dynamicCompletions ++ tableCompletions)
       } else {
-        (pluginCompletions ++ jupyterCompletions)
+        (pluginCompletions ++ jupyterCompletions ++ dynamicCompletions)
       }
     }
 
