@@ -94,6 +94,7 @@ final class ArcInterpreter extends Interpreter {
   var memoizedUDFPlugins: Option[List[ai.tripl.arc.plugins.UDFPlugin]] = None
   var memoizedDynamicConfigPlugins: Option[List[ai.tripl.arc.plugins.DynamicConfigurationPlugin]] = None
   var memoizedLifecyclePlugins: Option[List[ai.tripl.arc.plugins.LifecyclePlugin]] = None
+  var activeLifecyclePlugins: List[ai.tripl.arc.api.API.LifecyclePluginInstance] = List.empty
 
   // cache userData so state can be preserved between executions
   var memoizedUserData: collection.mutable.Map[String, Object] = collection.mutable.Map.empty
@@ -247,10 +248,10 @@ final class ArcInterpreter extends Interpreter {
             ("arc", commandArgs, lines.mkString("\n"))
           }
           case x if (x.startsWith("%configplugin")) => {
-            ("configplugin", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
+            ("arc", scala.collection.mutable.Map[String,String](), lines.mkString("\n"))
           }
           case x if (x.startsWith("%lifecycleplugin")) => {
-            ("lifecycleplugin", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
+            ("arc", scala.collection.mutable.Map[String,String](), lines.mkString("\n"))
           }
           case x if (x.startsWith("%schema")) => {
             ("schema", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
@@ -389,47 +390,51 @@ final class ArcInterpreter extends Interpreter {
             secretPattern.findFirstIn(command) match {
               case Some(_) => ExecuteResult.Error("Secret found in input. Use %secret to define to prevent accidental leaks.")
               case None => {
-                val (_, _, stages) = ConfigUtils.parseIPYNBCells(List(command))
-                val pipelineEither = ArcPipeline.parseConfig(Left(
-                  s"""{
-                    "plugins": {
-                      "lifecycle": [
-                        {
-                          "type": "OutputTable",
-                          "numRows": ${numRows},
-                          "maxNumRows": ${confMaxNumRows},
-                          "truncate": ${truncate},
-                          "monospace": ${monospace},
-                          "leftAlign": ${leftAlign},
-                          "datasetLabels": ${datasetLabels}
-                        }
-                      ]
-                    },
-                    "stages": [${stages}]
-                  }""")
-                  , arcContext)
-
-                pipelineEither match {
+                val (_, lifecycles, stages) = ConfigUtils.parseIPYNBCells(List(command))
+                val config = s"""{
+                |  "plugins": {
+                |    "lifecycle": [
+                |      {
+                |        "type": "OutputTable",
+                |        "numRows": ${numRows},
+                |        "maxNumRows": ${confMaxNumRows},
+                |        "truncate": ${truncate},
+                |        "monospace": ${monospace},
+                |        "leftAlign": ${leftAlign},
+                |        "datasetLabels": ${datasetLabels}
+                |      },
+                |      ${lifecycles}
+                |    ]
+                |  },
+                |  "stages": [${stages}]
+                |}""".stripMargin
+                ArcPipeline.parseConfig(Left(config), arcContext) match {
                   case Left(errors) => ExecuteResult.Error(ai.tripl.arc.config.Error.pipelineSimpleErrorMsg(errors, false))
                   case Right((pipeline, arcCtx)) => {
                     pipeline.stages.length match {
                       case 0 => {
-                        ExecuteResult.Error("No stages found.")
+                        if (lifecycles.trim.length == 0) {
+                          ExecuteResult.Error("No stages found.")
+                        } else {
+                          activeLifecyclePlugins = activeLifecyclePlugins ++ arcCtx.activeLifecyclePlugins
+                          ExecuteResult.Success(DisplayData.text("Success. No result."))
+                        }
                       }
                       case _ => {
                         outputHandler match {
                           case Some(oh) => arcCtx.userData += ("outputHandler" -> oh)
                           case None =>
                         }
-                        ARC.run(pipeline)(spark, logger, arcCtx) match {
+                        val lifecycleArcContext = arcCtx.copy(activeLifecyclePlugins=activeLifecyclePlugins)
+                        ARC.run(pipeline)(spark, logger, lifecycleArcContext) match {
                           case Some(df) => {
                             val result = Common.renderResult(spark, outputHandler, pipeline.stages.lastOption, df, inMemoryLoggerAppender, numRows, confMaxNumRows, truncate, monospace, leftAlign, datasetLabels, streamingDuration, confStreamingFrequency, confShowLog)
-                            memoizedUserData = arcCtx.userData
-                            memoizedResolutionConfig = arcCtx.resolutionConfig
+                            memoizedUserData = lifecycleArcContext.userData
+                            memoizedResolutionConfig = lifecycleArcContext.resolutionConfig
                             result
                           }
                           case None => {
-                            ExecuteResult.Success(DisplayData.text("Success. No result."))
+                            ExecuteResult.Success(DisplayData.html(Common.renderText("Success. No result.", inMemoryLoggerAppender, confShowLog)))
                           }
                         }
                       }
