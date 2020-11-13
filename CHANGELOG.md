@@ -1,5 +1,9 @@
 # Change Log
 
+## 3.10.0
+
+- add support for testing `%lifecycleplugin` via Jupyter.
+
 ## 3.9.0
 
 - add `CONF_MAX_NUM_ROWS` environment variable to set maximum number of rows returned to reduce data exfiltration risk.

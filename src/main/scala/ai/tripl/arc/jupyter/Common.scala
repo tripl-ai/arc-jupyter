@@ -141,6 +141,8 @@ object Common {
     |${arcContext.dynamicConfigurationPlugins.map(c => s" - ${c.getClass.getName}:${c.version}").sorted.mkString("\n")}
     |pipelinePlugins:
     |${arcContext.pipelineStagePlugins.map(c => s" - ${c.getClass.getName}:${c.version}").sorted.mkString("\n")}
+    |lifecyclePlugins:
+    |${arcContext.lifecyclePlugins.map(c => s" - ${c.getClass.getName}:${c.version}").sorted.mkString("\n")}
     |udfPlugins:
     |${arcContext.udfPlugins.map(c => s" - ${c.getClass.getName}:${c.version}").sorted.mkString("\n")}
     """.stripMargin
@@ -157,7 +159,7 @@ object Common {
     stmt
   }
 
-  def renderResult(spark: SparkSession, outputHandler: Option[OutputHandler], stage: Option[PipelineStage], df: DataFrame, inMemoryLoggerAppender: InMemoryLoggerAppender, numRows: Int, maxNumRows: Int, truncate: Int, monospace: Boolean, leftAlign: Boolean, datasetLabels: Boolean, streamingDuration: Int, confStreamingFrequency: Int, confShowLog: Boolean) = {
+  def renderResult(spark: SparkSession, outputHandler: Option[OutputHandler], stage: Option[PipelineStage], df: DataFrame, inMemoryLoggerAppender: InMemoryLoggerAppender, numRows: Int, maxNumRows: Int, truncate: Int, monospace: Boolean, leftAlign: Boolean, datasetLabels: Boolean, streamingDuration: Int, confStreamingFrequency: Int, confShowLog: Boolean): ExecuteResult = {
     if (!df.isStreaming) {
       ExecuteResult.Success(
         DisplayData.html(renderHTML(df, Option(inMemoryLoggerAppender), stage, numRows, maxNumRows, truncate, monospace, leftAlign, datasetLabels, confShowLog))
@@ -221,6 +223,17 @@ object Common {
         }
         case None => ExecuteResult.Error("No result.")
       }
+    }
+  }
+
+  def renderText(text: String, inMemoryLoggerAppender: InMemoryLoggerAppender, confShowLog: Boolean): String = {
+    val html = s"""<pre>${text}</pre>"""
+    if (confShowLog) {
+      val message = objectMapper.readValue(inMemoryLoggerAppender.getResult.last, classOf[java.util.HashMap[String, Object]])
+      val reformatted = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(message).replaceAll("\n"," ").replaceAll("\\s\\s+", " ").replaceAll("\" :", "\":").replaceAll("\\{ ", "{").replaceAll(" \\}", "}").replaceAll("\\[ ", "[").replaceAll(" \\]", "]")
+      s"""${html}<div class="log tex2jax_ignore"><div>${reformatted}</div></div>"""
+    } else {
+      html
     }
   }
 
@@ -347,9 +360,9 @@ object Common {
   )
 
   // memoize so as to not have to reload each time
-  var pluginCompletions: List[Completer] = List.empty
+  var pipelinePluginCompletions: List[Completer] = List.empty
+  var lifecyclePluginCompletions: List[Completer] = List.empty
   val jupyterCompletions = Seq(
-
     Completer(
       "%log",
       "execute",
@@ -454,8 +467,26 @@ object Common {
       jupyterCompletions
     } else {
       // only resolve plugins once
-      if (pluginCompletions.length == 0) {
-        pluginCompletions = arcContext.pipelineStagePlugins.flatMap { stage =>
+      if (pipelinePluginCompletions.length == 0) {
+        pipelinePluginCompletions = arcContext.pipelineStagePlugins.flatMap { stage =>
+          stage match {
+            case s: JupyterCompleter => Option(
+              Completer(
+                s.getClass.getSimpleName,
+                s.getClass.getPackage.getName.split("\\.").last,
+                s.snippet,
+                s.mimetype,
+                s.documentationURI.toString
+              )
+            )
+            case _ => None
+          }
+        }
+      }
+
+      if (lifecyclePluginCompletions.length == 0) {
+        println("here", arcContext.lifecyclePlugins)
+        lifecyclePluginCompletions = arcContext.lifecyclePlugins.flatMap { stage =>
           stage match {
             case s: JupyterCompleter => Option(
               Completer(
@@ -474,7 +505,7 @@ object Common {
       val dynamicCompletions = List(
         Completer(
           "%conf",
-          "execute",
+          "arc",
           s"""%conf
           |datasetLabels=${confDatasetLabels}
           |extendedErrors=${confExtendedErrors}
@@ -490,7 +521,7 @@ object Common {
         ),
         Completer(
           "%env",
-          "execute",
+          "arc",
           s"""%env
           |${commandLineArgs.map { case (key, configValue) => s"${key}=${if (configValue.secret) "*" * configValue.value.length else configValue.value }" }.toList.sorted.mkString("\n")}""".stripMargin,
           "shell",
@@ -501,9 +532,9 @@ object Common {
       // add any registered tables (see OutputTable for registration)
       if (arcContext.userData.contains(Common.TABLE_COMPLETIONS_KEY)) {
         val tableCompletions = arcContext.userData.get(Common.TABLE_COMPLETIONS_KEY).get.asInstanceOf[List[Completer]]
-        (pluginCompletions ++ jupyterCompletions ++ dynamicCompletions ++ tableCompletions)
+        (pipelinePluginCompletions ++ lifecyclePluginCompletions ++ jupyterCompletions ++ dynamicCompletions ++ tableCompletions)
       } else {
-        (pluginCompletions ++ jupyterCompletions ++ dynamicCompletions)
+        (pipelinePluginCompletions ++ lifecyclePluginCompletions ++ jupyterCompletions ++ dynamicCompletions)
       }
     }
 
