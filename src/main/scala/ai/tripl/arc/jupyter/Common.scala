@@ -362,88 +362,98 @@ object Common {
   // memoize so as to not have to reload each time
   var pipelinePluginCompletions: List[Completer] = List.empty
   var lifecyclePluginCompletions: List[Completer] = List.empty
-  val jupyterCompletions = Seq(
-    Completer(
-      "%log",
-      "execute",
-      """%log name="log" environments=production,test
-      |SELECT
-      |  TO_JSON(
-      |    NAMED_STRUCT(
-      |      'key', 'value'
-      |    )
-      |  ) AS message""".stripMargin,
-      "sql",
-      "https://arc.tripl.ai/execute/#logexecute"
-    ),
-    Completer(
-      "%configexecute",
-      "execute",
-      """%configexecute name="configexecute" environments=production,test
-      |SELECT
-      |  TO_JSON(
-      |    NAMED_STRUCT(
-      |      'key', 'value'
-      |    )
-      |  ) AS parameters""".stripMargin,
-      "sql",
-      "https://arc.tripl.ai/execute/#configexecute"
-    ),
-    Completer(
-      "%metadatafilter",
-      "transform",
-      """%metadatafilter name="metadatafiltertransform" inputView=inputView outputView=outputView environments=production,test
-      |SELECT
-      |  *
-      |FROM metadata""".stripMargin,
-      "sql",
-      "https://arc.tripl.ai/transform/#metadatafiltertransform"
-    ),
-    Completer(
-      "%metadatavalidate",
-      "validate",
-      """%metadatavalidate name="metadatavalidate" inputView=inputView environments=production,test
-      |SELECT
-      |  SUM(test) = 0
-      |  ,TO_JSON(
-      |    NAMED_STRUCT(
-      |      'columns', COUNT(*),
-      |      'test', SUM(test)
-      |    )
-      |  )
-      |FROM (
-      |  SELECT
-      |    CASE WHEN TRUE THEN 1 ELSE 0 END AS test
-      |  FROM metadata
-      |) valid""".stripMargin,
-      "sql",
-      "https://arc.tripl.ai/validate/#metadatavalidate"
-    ),
-    Completer(
-      "%sql",
-      "transform",
-      """%sql name="sqltransform" outputView=outputView environments=production,test
-      |SELECT
-      |  *
-      |FROM inputView""".stripMargin,
-      "sql",
-      "https://arc.tripl.ai/transform/#sqltransform"
-    ),
-    Completer(
-      "%sqlvalidate",
-      "validate",
-      """%sqlvalidate name="sqlvalidate" environments=production,test
-      |SELECT
-      |  TRUE AS valid
-      |  ,TO_JSON(
-      |    NAMED_STRUCT(
-      |      'key', 'value'
-      |    )
-      |  ) AS message""".stripMargin,
-      "sql",
-      "https://arc.tripl.ai/validate/#sqlvalidate"
-    ),
-  )
+
+  def makeJupyterCompletions(completionEnvironments: String): Seq[Completer] = {
+    Seq(
+      Completer(
+        "%log",
+        "execute",
+        s"""%log name="log" environments=${completionEnvironments}
+        |SELECT
+        |  TO_JSON(
+        |    NAMED_STRUCT(
+        |      'key', 'value'
+        |    )
+        |  ) AS message""".stripMargin,
+        "sql",
+        "https://arc.tripl.ai/execute/#logexecute"
+      ),
+      Completer(
+        "%configexecute",
+        "execute",
+        s"""%configexecute name="configexecute" environments=${completionEnvironments}
+        |SELECT
+        |  TO_JSON(
+        |    NAMED_STRUCT(
+        |      'key', 'value'
+        |    )
+        |  ) AS parameters""".stripMargin,
+        "sql",
+        "https://arc.tripl.ai/execute/#configexecute"
+      ),
+      Completer(
+        "%metadatafilter",
+        "transform",
+        s"""%metadatafilter name="metadatafiltertransform" inputView=inputView outputView=outputView environments=${completionEnvironments}
+        |SELECT
+        |  *
+        |FROM metadata""".stripMargin,
+        "sql",
+        "https://arc.tripl.ai/transform/#metadatafiltertransform"
+      ),
+      Completer(
+        "%metadatavalidate",
+        "validate",
+        s"""%metadatavalidate name="metadatavalidate" inputView=inputView environments=${completionEnvironments}
+        |SELECT
+        |  SUM(test) = 0
+        |  ,TO_JSON(
+        |    NAMED_STRUCT(
+        |      'columns', COUNT(*),
+        |      'test', SUM(test)
+        |    )
+        |  )
+        |FROM (
+        |  SELECT
+        |    CASE WHEN TRUE THEN 1 ELSE 0 END AS test
+        |  FROM metadata
+        |) valid""".stripMargin,
+        "sql",
+        "https://arc.tripl.ai/validate/#metadatavalidate"
+      ),
+      Completer(
+        "%sql",
+        "transform",
+        s"""%sql name="sqltransform" outputView=outputView environments=${completionEnvironments}
+        |SELECT
+        |  *
+        |FROM inputView""".stripMargin,
+        "sql",
+        "https://arc.tripl.ai/transform/#sqltransform"
+      ),
+      Completer(
+        "%sqlvalidate",
+        "validate",
+        s"""%sqlvalidate name="sqlvalidate" environments=${completionEnvironments}
+        |SELECT
+        |  TRUE AS valid
+        |  ,TO_JSON(
+        |    NAMED_STRUCT(
+        |      'key', 'value'
+        |    )
+        |  ) AS message""".stripMargin,
+        "sql",
+        "https://arc.tripl.ai/validate/#sqlvalidate"
+      ),
+      Completer(
+        "%version",
+        "arc",
+        s"""%version""".stripMargin,
+        "shell",
+        ""
+      ),
+    )
+  }
 
   // todo: these should come from traits in arc
   def getCompletions(
@@ -459,8 +469,11 @@ object Common {
     confTruncate: Int,
     confStreaming: Boolean,
     confStreamingDuration: Int,
+    confCompletionEnvironments: String,
   )(implicit spark: SparkSession, arcContext: ARCContext): Completion = {
     import spark.implicits._
+
+    val jupyterCompletions = makeJupyterCompletions(confCompletionEnvironments)
 
     // progressively enable additional completions as the arcContext becomes available
     val completions = if (arcContext == null) {
@@ -485,7 +498,6 @@ object Common {
       }
 
       if (lifecyclePluginCompletions.length == 0) {
-        println("here", arcContext.lifecyclePlugins)
         lifecyclePluginCompletions = arcContext.lifecyclePlugins.flatMap { stage =>
           stage match {
             case s: JupyterCompleter => Option(

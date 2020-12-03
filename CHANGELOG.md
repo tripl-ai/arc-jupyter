@@ -1,5 +1,9 @@
 # Change Log
 
+## 3.10.1
+
+- **FIX** dynamic completions where not being populated.
+
 ## 3.10.0
 
 - add support for testing `%lifecycleplugin` via Jupyter.

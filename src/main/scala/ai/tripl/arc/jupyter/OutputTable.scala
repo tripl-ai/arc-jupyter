@@ -14,24 +14,25 @@ import almond.interpreter.api.{DisplayData, OutputHandler}
 
 class OutputTable extends LifecyclePlugin {
 
-  val version = "0.0.1"
+  val version = "0.0.2"
 
   def instantiate(index: Int, config: com.typesafe.config.Config)(implicit spark: SparkSession, logger: ai.tripl.arc.util.log.logger.Logger, arcContext: ARCContext): Either[List[ai.tripl.arc.config.Error.StageError], LifecyclePluginInstance] = {
     import ai.tripl.arc.config.ConfigReader._
     import ai.tripl.arc.config.ConfigUtils._
     implicit val c = config
 
-    val expectedKeys = "type" :: "numRows" :: "maxNumRows" :: "truncate" :: "monospace" :: "leftAlign" :: "datasetLabels" :: Nil
+    val expectedKeys = "type" :: "numRows" :: "maxNumRows" :: "truncate" :: "monospace" :: "leftAlign" :: "datasetLabels" :: "completionEnvironments" :: Nil
     val numRows = getValue[Int]("numRows")
     val maxNumRows = getValue[Int]("maxNumRows")
     val truncate = getValue[Int]("truncate")
     val monospace = getValue[java.lang.Boolean]("monospace")
     val leftAlign = getValue[java.lang.Boolean]("leftAlign")
     val datasetLabels = getValue[java.lang.Boolean]("datasetLabels")
+    val completionEnvironments = getValue[String]("completionEnvironments")
     val invalidKeys = checkValidKeys(c)(expectedKeys)
 
-    (numRows, maxNumRows, truncate, monospace, leftAlign, datasetLabels, invalidKeys) match {
-      case (Right(numRows), Right(maxNumRows), Right(truncate), Right(monospace), Right(leftAlign), Right(datasetLabels), Right(invalidKeys)) =>
+    (numRows, maxNumRows, truncate, monospace, leftAlign, datasetLabels, completionEnvironments, invalidKeys) match {
+      case (Right(numRows), Right(maxNumRows), Right(truncate), Right(monospace), Right(leftAlign), Right(datasetLabels), Right(completionEnvironments), Right(invalidKeys)) =>
         Right(OutputTablePlugin(
           plugin=this,
           numRows=numRows,
@@ -39,10 +40,11 @@ class OutputTable extends LifecyclePlugin {
           truncate=truncate,
           monospace=monospace,
           leftAlign=leftAlign,
-          datasetLabels=datasetLabels
+          datasetLabels=datasetLabels,
+          completionEnvironments=completionEnvironments,
         ))
       case _ =>
-        val allErrors: Errors = List(numRows, maxNumRows, truncate, monospace, leftAlign, datasetLabels, invalidKeys).collect{ case Left(errs) => errs }.flatten
+        val allErrors: Errors = List(numRows, maxNumRows, truncate, monospace, leftAlign, datasetLabels, completionEnvironments, invalidKeys).collect{ case Left(errs) => errs }.flatten
         val err = StageError(index, this.getClass.getName, c.origin.lineNumber, allErrors)
         Left(err :: Nil)
     }
@@ -56,7 +58,8 @@ case class OutputTablePlugin (
     truncate: Int,
     monospace: Boolean,
     leftAlign: Boolean,
-    datasetLabels: Boolean
+    datasetLabels: Boolean,
+    completionEnvironments: String,
   ) extends LifecyclePluginInstance {
 
   override def after(result: Option[DataFrame], stage: PipelineStage, index: Int, stages: List[PipelineStage])(implicit spark: SparkSession, logger: ai.tripl.arc.util.log.logger.Logger, arcContext: ARCContext): Option[DataFrame] = {
@@ -99,7 +102,7 @@ case class OutputTablePlugin (
           Common.Completer(
             s"%sql ${name}",
             "transform",
-            s"""%sql name="${name}" outputView=outputView environments=production,test
+            s"""%sql name="${name}" outputView=outputView environments=${completionEnvironments}
             |SELECT
             |${fields.mkString("  ", "\n  ,", "")}
             |FROM ${name}""".stripMargin,
