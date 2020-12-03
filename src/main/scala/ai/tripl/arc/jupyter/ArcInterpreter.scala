@@ -44,8 +44,6 @@ import ai.tripl.arc.util.MetadataUtils
 import ai.tripl.arc.util.SerializableConfiguration
 import ai.tripl.arc.util.SQLUtils
 
-
-
 case class FileDisplay(
   path: String,
   name: String,
@@ -86,6 +84,7 @@ final class ArcInterpreter extends Interpreter {
   var confShowLog = Try(envOrNone("CONF_SHOW_LOG").get.toBoolean).getOrElse(false)
   var policyInlineSQL = Try(envOrNone("ETL_POLICY_INLINE_SQL").get.toBoolean).getOrElse(true)
   var policyInlineSchema = Try(envOrNone("ETL_POLICY_INLINE_SCHEMA").get.toBoolean).getOrElse(true)
+  var confCompletionEnvironments = Try(envOrNone("CONF_COMPLETION_ENVIRONMENTS").get.toString).getOrElse("production,test")
   var confStreaming = false
   var udfsRegistered = false
 
@@ -125,7 +124,7 @@ final class ArcInterpreter extends Interpreter {
   override def asyncComplete(code: String, pos: Int): Option[CancellableFuture[Completion]] = {
     val spaceIndex = code.indexOf(" ")
     if (spaceIndex == -1 || (pos < spaceIndex)){
-      val c = Common.getCompletions(pos, code.length, confCommandLineArgs, confDatasetLabels, confExtendedErrors, confLeftAlign, confShowLog, confMonospace, confNumRows, confTruncate, confStreaming, confStreamingDuration)
+      val c = Common.getCompletions(pos, code.length, confCommandLineArgs, confDatasetLabels, confExtendedErrors, confLeftAlign, confShowLog, confMonospace, confNumRows, confTruncate, confStreaming, confStreamingDuration, confCompletionEnvironments)
       Some(CancellableFuture(Future.successful(c), () => sys.error("should not happen")))
     } else {
       None
@@ -401,7 +400,8 @@ final class ArcInterpreter extends Interpreter {
                 |        "truncate": ${truncate},
                 |        "monospace": ${monospace},
                 |        "leftAlign": ${leftAlign},
-                |        "datasetLabels": ${datasetLabels}
+                |        "datasetLabels": ${datasetLabels},
+                |        "completionEnvironments": "${confCompletionEnvironments}"
                 |      },
                 |      ${lifecycles}
                 |    ]
@@ -425,12 +425,12 @@ final class ArcInterpreter extends Interpreter {
                           case Some(oh) => arcCtx.userData += ("outputHandler" -> oh)
                           case None =>
                         }
-                        val lifecycleArcContext = arcCtx.copy(activeLifecyclePlugins=activeLifecyclePlugins)
-                        ARC.run(pipeline)(spark, logger, lifecycleArcContext) match {
+                        arcContext = arcCtx.copy(activeLifecyclePlugins=activeLifecyclePlugins ++ arcCtx.activeLifecyclePlugins)
+                        ARC.run(pipeline)(spark, logger, arcContext) match {
                           case Some(df) => {
                             val result = Common.renderResult(spark, outputHandler, pipeline.stages.lastOption, df, inMemoryLoggerAppender, numRows, confMaxNumRows, truncate, monospace, leftAlign, datasetLabels, streamingDuration, confStreamingFrequency, confShowLog)
-                            memoizedUserData = lifecycleArcContext.userData
-                            memoizedResolutionConfig = lifecycleArcContext.resolutionConfig
+                            memoizedUserData = arcContext.userData
+                            memoizedResolutionConfig = arcContext.resolutionConfig
                             result
                           }
                           case None => {
