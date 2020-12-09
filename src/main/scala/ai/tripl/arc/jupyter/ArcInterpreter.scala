@@ -43,6 +43,7 @@ import ai.tripl.arc.plugins._
 import ai.tripl.arc.util.MetadataUtils
 import ai.tripl.arc.util.SerializableConfiguration
 import ai.tripl.arc.util.SQLUtils
+import ai.tripl.arc.util.DetailException
 
 case class FileDisplay(
   path: String,
@@ -210,17 +211,18 @@ final class ArcInterpreter extends Interpreter {
     inputManager: Option[InputManager],
     outputHandler: Option[OutputHandler]
   ): ExecuteResult = {
+    val startTime = System.currentTimeMillis()
     val listenerElementHandle = Common.randStr(32)
     var executionListener: Option[ProgressSparkListener] = None
+    val inMemoryLoggerAppender = new InMemoryLoggerAppender()
+    implicit val logger = Common.getLogger(Some(inMemoryLoggerAppender))
 
     try {
       val executeResult = if (runtimeMemory > physicalMemory) {
-        return ExecuteResult.Error(s"Cannot execute as requested JVM memory (-Xmx${FileUtils.byteCountToDisplaySize(runtimeMemory)}B) exceeds available system memory (${FileUtils.byteCountToDisplaySize(physicalMemory)}B) limit.\nEither decrease the requested JVM memory or, if running in Docker, increase the Docker memory limit.")
+        return ExecuteResult.Error(s"Cannot execute as requested JVM memory (-Xmx${FileUtils.byteCountToDisplaySize(runtimeMemory)}) exceeds available system memory (${FileUtils.byteCountToDisplaySize(physicalMemory)}) limit.\nEither decrease the requested JVM memory or, if running in Docker, increase the Docker memory limit.")
       } else if (spark == null) {
         return ExecuteResult.Error(s"SparkSession has not been initialised. Please restart Kernel or wait for startup completion.")
       } else {
-        val inMemoryLoggerAppender = new InMemoryLoggerAppender()
-        implicit val logger = Common.getLogger(Some(inMemoryLoggerAppender))
 
         // if session config changed and session stopped
         val session = startSession()
@@ -233,7 +235,7 @@ final class ArcInterpreter extends Interpreter {
         val (interpreter, commandArgs, command) = lines(0) match {
           case x if x.startsWith("%arc") => ("arc", parseArgs(lines(0)), lines.drop(1).mkString("\n"))
           // outputs which may have outputView
-          case x if (x.startsWith("%sql") && !x.startsWith("%sqlvalidate")) || x.startsWith("%metadatafilter")  || x.startsWith("%configexecute") => {
+          case x if (x.startsWith("%sql") && !x.startsWith("%sqlvalidate")) || x.startsWith("%metadatafilter")  || x.startsWith("%configexecute") || x.startsWith("%log") => {
             val commandArgs = parseArgs(lines(0))
             commandArgs.get("outputView") match {
               case None => {
@@ -525,8 +527,8 @@ final class ArcInterpreter extends Interpreter {
             val text = s"""
             |Arc Options:
             |master: ${confMaster}
-            |runtimeMemory: ${runtimeMemory}B
-            |physicalMemory: ${physicalMemory}B
+            |runtimeMemory: ${FileUtils.byteCountToDisplaySize(runtimeMemory)}
+            |physicalMemory: ${FileUtils.byteCountToDisplaySize(physicalMemory)}
             |storageLevel: ${storageLevelName}
             |streaming: ${confStreaming}
             |streamingDuration: ${confStreamingDuration}
@@ -589,6 +591,29 @@ final class ArcInterpreter extends Interpreter {
       removeListener(spark, executionListener, error)(outputHandler)
       executeResult
     } catch {
+      case e: Exception with DetailException => {
+        val exceptionThrowables = ExceptionUtils.getThrowableList(e).asScala
+        val exceptionThrowablesMessages = exceptionThrowables.map(e => e.getMessage).asJava
+
+        e.detail.put("event", "exception")
+        e.detail.put("messages", exceptionThrowablesMessages)
+
+        logger.error()
+          .field("event", "exit")
+          .field("status", "failure")
+          .field("success", java.lang.Boolean.valueOf(false))
+          .field("duration", System.currentTimeMillis() - startTime)
+          .map("stage", e.detail.asJava)
+          .log()
+
+        removeListener(spark, executionListener, true)(outputHandler)
+        if (confExtendedErrors) {
+          val exceptionThrowablesMessages = exceptionThrowables.map(e => e.getMessage).mkString("\n\n")
+          ExecuteResult.Error(exceptionThrowablesMessages)
+        } else {
+          ExecuteResult.Error(e.getMessage)
+        }
+      }
       case e: Exception => {
         removeListener(spark, executionListener, true)(outputHandler)
         if (confExtendedErrors) {
