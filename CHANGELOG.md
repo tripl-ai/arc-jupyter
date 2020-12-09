@@ -1,5 +1,10 @@
 # Change Log
 
+## 3.11.0
+
+- add logs to console when errors occur.
+- **FIX** defect where `%log` was not accepting options.
+
 ## 3.10.1
 
 - **FIX** dynamic completions where not being populated.
