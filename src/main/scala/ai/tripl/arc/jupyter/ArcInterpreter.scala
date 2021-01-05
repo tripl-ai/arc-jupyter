@@ -85,7 +85,8 @@ final class ArcInterpreter extends Interpreter {
   var confShowLog = Try(envOrNone("CONF_SHOW_LOG").get.toBoolean).getOrElse(false)
   var policyInlineSQL = Try(envOrNone("ETL_POLICY_INLINE_SQL").get.toBoolean).getOrElse(true)
   var policyInlineSchema = Try(envOrNone("ETL_POLICY_INLINE_SCHEMA").get.toBoolean).getOrElse(true)
-  var confCompletionEnvironments = Try(envOrNone("CONF_COMPLETION_ENVIRONMENTS").get.toString).getOrElse("production,test")
+  var confCompletionEnvironments = Try(envOrNone("ETL_CONF_COMPLETION_ENVIRONMENTS").get.toString).getOrElse("production,test").split(",").toList
+
   var confStreaming = false
   var udfsRegistered = false
 
@@ -125,7 +126,7 @@ final class ArcInterpreter extends Interpreter {
   override def asyncComplete(code: String, pos: Int): Option[CancellableFuture[Completion]] = {
     val spaceIndex = code.indexOf(" ")
     if (spaceIndex == -1 || (pos < spaceIndex)){
-      val c = Common.getCompletions(pos, code.length, confCommandLineArgs, confDatasetLabels, confExtendedErrors, confLeftAlign, confShowLog, confMonospace, confNumRows, confTruncate, confStreaming, confStreamingDuration, confCompletionEnvironments)
+      val c = Common.getCompletions(pos, code.length, confCommandLineArgs, confDatasetLabels, confExtendedErrors, confLeftAlign, confShowLog, confMonospace, confNumRows, confTruncate, confStreaming, confStreamingDuration, confCompletionEnvironments.mkString(","))
       Some(CancellableFuture(Future.successful(c), () => sys.error("should not happen")))
     } else {
       None
@@ -295,6 +296,7 @@ final class ArcInterpreter extends Interpreter {
         val monospace = Try(commandArgs.get("monospace").get.toBoolean).getOrElse(confMonospace)
         val leftAlign = Try(commandArgs.get("leftAlign").get.toBoolean).getOrElse(confLeftAlign)
         val datasetLabels = Try(commandArgs.get("datasetLabels").get.toBoolean).getOrElse(confDatasetLabels)
+        val showLog = Try(commandArgs.get("showLog").get.toBoolean).getOrElse(confShowLog)
 
         // store previous values so that the ServiceLoader resolution is not called each run
         val pipelineStagePlugins = memoizedPipelineStagePlugins match {
@@ -362,6 +364,7 @@ final class ArcInterpreter extends Interpreter {
           inlineSchema=policyInlineSchema,
           inlineSQL=policyInlineSQL,
           resolutionConfig=memoizedResolutionConfig,
+          completionEnvironments=confCompletionEnvironments,
         )
 
         // register udfs once
@@ -430,13 +433,13 @@ final class ArcInterpreter extends Interpreter {
                         arcContext = arcCtx.copy(activeLifecyclePlugins=activeLifecyclePlugins ++ arcCtx.activeLifecyclePlugins)
                         ARC.run(pipeline)(spark, logger, arcContext) match {
                           case Some(df) => {
-                            val result = Common.renderResult(spark, outputHandler, pipeline.stages.lastOption, df, inMemoryLoggerAppender, numRows, confMaxNumRows, truncate, monospace, leftAlign, datasetLabels, streamingDuration, confStreamingFrequency, confShowLog)
+                            val result = Common.renderResult(spark, outputHandler, pipeline.stages.lastOption, df, inMemoryLoggerAppender, numRows, confMaxNumRows, truncate, monospace, leftAlign, datasetLabels, streamingDuration, confStreamingFrequency, showLog)
                             memoizedUserData = arcContext.userData
                             memoizedResolutionConfig = arcContext.resolutionConfig
                             result
                           }
                           case None => {
-                            ExecuteResult.Success(DisplayData.html(Common.renderText("Success. No result.", inMemoryLoggerAppender, confShowLog)))
+                            ExecuteResult.Success(DisplayData.html(Common.renderText("Success. No result.", inMemoryLoggerAppender, showLog)))
                           }
                         }
                       }
@@ -520,7 +523,7 @@ final class ArcInterpreter extends Interpreter {
             confStreamingDuration = Try(commandArgs.get("streamingDuration").get.toInt).getOrElse(confStreamingDuration)
             confMonospace = Try(commandArgs.get("monospace").get.toBoolean).getOrElse(confMonospace)
             confLeftAlign = Try(commandArgs.get("leftAlign").get.toBoolean).getOrElse(confLeftAlign)
-            confShowLog = Try(commandArgs.get("logger").get.toBoolean).getOrElse(confShowLog)
+            confShowLog = Try(commandArgs.get("showLog").get.toBoolean).getOrElse(confShowLog)
             confDatasetLabels = Try(commandArgs.get("datasetLabels").get.toBoolean).getOrElse(confDatasetLabels)
             confExtendedErrors = Try(commandArgs.get("extendedErrors").get.toBoolean).getOrElse(confExtendedErrors)
 
@@ -537,7 +540,7 @@ final class ArcInterpreter extends Interpreter {
             |datasetLabels: ${confDatasetLabels}
             |extendedErrors: ${confExtendedErrors}
             |leftAlign: ${leftAlign}
-            |logger: ${confShowLog}
+            |showLog: ${confShowLog}
             |maxNumRows: ${confMaxNumRows}
             |monospace: ${confMonospace}
             |numRows: ${confNumRows}

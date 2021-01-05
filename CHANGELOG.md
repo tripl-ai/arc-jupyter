@@ -1,5 +1,11 @@
 # Change Log
 
+## 3.12.0
+
+- rename `logger` to `showLog`.
+- add `ETL_CONF_COMPLETION_ENVIRONMENTS` environment variable to allow setting the default environments for `Completions`. E.g. `production,test`.
+- update to Arc 3.7.0.
+
 ## 3.11.0
 
 - add logs to console when errors occur.
