@@ -1,5 +1,9 @@
 # Change Log
 
+## 3.12.1
+
+- **FIX** defect with `%` magic completions showing `List(x,y,z)`.
+
 ## 3.12.0
 
 - rename `logger` to `showLog`.

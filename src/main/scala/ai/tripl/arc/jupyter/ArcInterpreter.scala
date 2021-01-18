@@ -406,7 +406,7 @@ final class ArcInterpreter extends Interpreter {
                 |        "monospace": ${monospace},
                 |        "leftAlign": ${leftAlign},
                 |        "datasetLabels": ${datasetLabels},
-                |        "completionEnvironments": "${confCompletionEnvironments}"
+                |        "completionEnvironments": "${confCompletionEnvironments.mkString(",")}"
                 |      },
                 |      ${lifecycles}
                 |    ]
