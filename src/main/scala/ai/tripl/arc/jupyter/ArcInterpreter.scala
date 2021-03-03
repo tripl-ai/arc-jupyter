@@ -36,6 +36,8 @@ import org.apache.commons.lang3.exception.ExceptionUtils
 
 import com.typesafe.config._
 
+import org.slf4j.MDC
+
 import ai.tripl.arc.api.API.ARCContext
 import ai.tripl.arc.ARC
 import ai.tripl.arc.config.{ArcPipeline, ConfigUtils}
@@ -176,6 +178,9 @@ final class ArcInterpreter extends Interpreter {
 
       val loader = ai.tripl.arc.util.Utils.getContextOrSparkClassLoader
       implicit val logger = Common.getLogger()
+
+      // add jupyterhub user to all log messages if available
+      envOrNone("JUPYTERHUB_USER").foreach { j => MDC.put("jupyterHubUser", j) }
 
       val sparkConf = new java.util.HashMap[String, String]()
       spark.sparkContext.getConf.getAll.filter{ case (k, _) => !Seq("spark.authenticate.secret").contains(k) }.foreach{ case (k, v) => sparkConf.put(k, v) }

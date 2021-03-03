@@ -1,5 +1,12 @@
 # Change Log
 
+## 3.13.0
+
+- if present add `JUPYTERHUB_USER` environment variable value to all log messages.
+- bump to Spark [3.1.1](https://spark.apache.org/releases/spark-release-3-1-1.html).
+- update `sh.almond:kernel` to 0.11.0.
+- update to Arc 3.8.0.
+
 ## 3.12.1
 
 - **FIX** defect with `%` magic completions showing `List(x,y,z)`.
