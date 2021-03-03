@@ -522,7 +522,7 @@ object Common {
           |datasetLabels=${confDatasetLabels}
           |extendedErrors=${confExtendedErrors}
           |leftAlign=${confLeftAlign}
-          |logger=${confShowLog}
+          |showLog=${confShowLog}
           |monospace=${confMonospace}
           |numRows=${confNumRows}
           |streaming=${confStreaming}
