@@ -1,5 +1,10 @@
 # Change Log
 
+## 3.13.1
+
+- **FIX** revert to Spark [3.0.2](https://spark.apache.org/news/spark-3-0-2-released.html) until Delta supports Spark [3.1.1](https://spark.apache.org/releases/spark-release-3-1-1.html).
+- update `sh.almond:kernel` to 0.11.1.
+
 ## 3.13.0
 
 - if present add `JUPYTERHUB_USER` environment variable value to all log messages.
