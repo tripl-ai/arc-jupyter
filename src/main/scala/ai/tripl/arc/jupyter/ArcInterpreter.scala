@@ -87,6 +87,7 @@ final class ArcInterpreter extends Interpreter {
   var confShowLog = Try(envOrNone("CONF_SHOW_LOG").get.toBoolean).getOrElse(false)
   var policyInlineSQL = Try(envOrNone("ETL_POLICY_INLINE_SQL").get.toBoolean).getOrElse(true)
   var policyInlineSchema = Try(envOrNone("ETL_POLICY_INLINE_SCHEMA").get.toBoolean).getOrElse(true)
+  var policyDropUnsupported = Try(envOrNone("ETL_POLICY_DROP_UNSUPPORTED").get.toBoolean).getOrElse(false)
   var confCompletionEnvironments = Try(envOrNone("ETL_CONF_COMPLETION_ENVIRONMENTS").get.toString).getOrElse("production,test").split(",").toList
 
   var confStreaming = false
@@ -197,6 +198,7 @@ final class ArcInterpreter extends Interpreter {
         .field("physicalMemory", s"${physicalMemory}B")
         .field("policyInlineSQL", policyInlineSQL.toString)
         .field("policyInlineSchema", policyInlineSchema.toString)
+        .field("policyDropUnsupported", policyDropUnsupported.toString)
         .log()
 
       // only set default aws provider override if not provided

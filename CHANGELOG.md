@@ -1,5 +1,10 @@
 # Change Log
 
+## 3.14.1
+
+- add `ETL_POLICY_DROP_UNSUPPORTED` environment variable to allow setting the `dropUnsupported` policy.
+- update `sh.almond:kernel` to 0.11.2.
+
 ## 3.14.0
 
 - bump to Spark [3.1.2](https://spark.apache.org/releases/spark-release-3-1-2.html).
