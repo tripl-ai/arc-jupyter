@@ -1,5 +1,10 @@
 # Change Log
 
+## 3.14.2
+
+- **FIX** `ETL_POLICY_DROP_UNSUPPORTED` environment variable to allow setting the `dropUnsupported` policy.
+- change `ETL_POLICY_DROP_UNSUPPORTED` default to `true`.
+
 ## 3.14.1
 
 - add `ETL_POLICY_DROP_UNSUPPORTED` environment variable to allow setting the `dropUnsupported` policy.

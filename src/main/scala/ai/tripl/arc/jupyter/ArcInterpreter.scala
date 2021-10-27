@@ -87,7 +87,7 @@ final class ArcInterpreter extends Interpreter {
   var confShowLog = Try(envOrNone("CONF_SHOW_LOG").get.toBoolean).getOrElse(false)
   var policyInlineSQL = Try(envOrNone("ETL_POLICY_INLINE_SQL").get.toBoolean).getOrElse(true)
   var policyInlineSchema = Try(envOrNone("ETL_POLICY_INLINE_SCHEMA").get.toBoolean).getOrElse(true)
-  var policyDropUnsupported = Try(envOrNone("ETL_POLICY_DROP_UNSUPPORTED").get.toBoolean).getOrElse(false)
+  var policyDropUnsupported = Try(envOrNone("ETL_POLICY_DROP_UNSUPPORTED").get.toBoolean).getOrElse(true)
   var confCompletionEnvironments = Try(envOrNone("ETL_CONF_COMPLETION_ENVIRONMENTS").get.toString).getOrElse("production,test").split(",").toList
 
   var confStreaming = false
@@ -359,7 +359,7 @@ final class ArcInterpreter extends Interpreter {
           commandLineArguments=confCommandLineArgs.map { case (key, config) => (key, config.value) },
           storageLevel=storageLevel,
           immutableViews=false,
-          dropUnsupported=false,
+          dropUnsupported=policyDropUnsupported,
           dynamicConfigurationPlugins=dynamicConfigsPlugins,
           lifecyclePlugins=lifecyclePlugins,
           activeLifecyclePlugins=Nil,
