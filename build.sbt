@@ -13,8 +13,8 @@ lazy val root = (project in file(".")).
     crossScalaVersions := supportedScalaVersions,
     licenses := List("MIT" -> new URL("https://opensource.org/licenses/MIT")),
     libraryDependencies ++= etlDeps,
-    parallelExecution in Test := false,
-    parallelExecution in IntegrationTest := false,
+    Test / parallelExecution := false,
+    IntegrationTest / parallelExecution := false,
     buildInfoKeys := Seq[BuildInfoKey](version, scalaVersion),
     buildInfoPackage := "ai.tripl.arc.jupyter",
     Defaults.itSettings,
@@ -30,6 +30,6 @@ publishM2Configuration := publishM2Configuration.value.withOverwrite(true)
 
 resolvers += "Spark Staging" at "https://repository.apache.org/content/repositories/orgapachespark-1345/"
 
-fork in run := true
+run / fork := true
 
 scalacOptions := Seq("-target:jvm-1.8", "-unchecked", "-deprecation")
