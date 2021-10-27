@@ -1,5 +1,10 @@
 # Change Log
 
+## 3.14.0
+
+- bump to Spark [3.1.2](https://spark.apache.org/releases/spark-release-3-1-2.html).
+- update to Arc 3.11.0.
+
 ## 3.13.1
 
 - **FIX** revert to Spark [3.0.2](https://spark.apache.org/news/spark-3-0-2-released.html) until Delta supports Spark [3.1.1](https://spark.apache.org/releases/spark-release-3-1-1.html).
