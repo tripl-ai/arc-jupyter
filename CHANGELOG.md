@@ -1,5 +1,10 @@
 # Change Log
 
+## 3.15.0
+
+- bump to Spark [3.3.2](https://spark.apache.org/releases/spark-release-3-3-2.html).
+- update to Arc 3.13.2.
+
 ## 3.14.2
 
 - **FIX** `ETL_POLICY_DROP_UNSUPPORTED` environment variable to allow setting the `dropUnsupported` policy.
