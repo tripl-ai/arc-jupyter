@@ -1,5 +1,10 @@
 # Change Log
 
+## 3.15.1
+
+- Updated Almond to 0.13.4
+- Disabled getLogger calls due to runtime exception
+
 ## 3.15.0
 
 - bump to Spark [3.3.2](https://spark.apache.org/releases/spark-release-3-3-2.html).
