@@ -2,7 +2,7 @@ import sbt._
 
 object Dependencies {
   // Versions
-  lazy val sparkVersion = "3.3.2"
+  lazy val sparkVersion = "3.3.4"
 
   val sparkCore = "org.apache.spark" %% "spark-core" % sparkVersion % "provided"
   val sparkSql = "org.apache.spark" %% "spark-sql" % sparkVersion % "provided"
@@ -11,7 +11,7 @@ object Dependencies {
 
   val kernel = "sh.almond" %% "kernel" % "0.13.4"
 
-  val arc = "ai.tripl" %% "arc" % "3.13.2" % "provided"
+  val arc = "ai.tripl" %% "arc" % "4.2.0" % "provided"
 
   val etlDeps = Seq(
     sparkCore,
