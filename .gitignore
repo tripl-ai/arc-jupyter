@@ -13,3 +13,4 @@ metals.sbt
 local/
 target/
 project/project
+.bsp/
